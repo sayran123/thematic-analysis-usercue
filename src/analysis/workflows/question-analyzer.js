@@ -9,6 +9,8 @@ import { StateGraph, END, START } from '@langchain/langgraph';
 import { Annotation } from '@langchain/langgraph';
 import { logOperation } from '../../utils/config/llm-config.js';
 import { ThemeGeneratorAgent } from '../agents/theme-generator.js';
+import { ClassifierAgent } from '../agents/classifier.js';
+import { QuoteExtractorAgent } from '../agents/quote-extractor.js';
 import { ThemeValidator } from '../../utils/validation/theme-validator.js';
 
 /**
@@ -33,6 +35,8 @@ export class QuestionAnalysisWorkflow {
   constructor() {
     this.graph = null;
     this.themeGeneratorAgent = null; // Initialize on first use
+    this.classifierAgent = null; // Initialize on first use
+    this.quoteExtractorAgent = null; // Initialize on first use
     this.themeValidator = null; // Initialize on first use
     this.initializeGraph();
   }
@@ -253,24 +257,68 @@ export class QuestionAnalysisWorkflow {
    * @returns {Promise<QuestionAnalysisState>} Updated state with classifications
    */
   async classifyResponses(state) {
-    logOperation('node-classifyResponses', { 
+    logOperation('node-classifyResponses-start', { 
+      questionId: state.question.questionId,
       themeCount: state.themes?.length,
       responseCount: state.responses?.length 
     });
     
-    // MVP placeholder: Create mock classifications
-    const classifications = state.responses.map((response, index) => ({
-      participantId: response.participantId,
-      questionId: response.questionId,
-      themeId: index % 2 === 0 ? 'theme1' : 'theme2',
-      theme: index % 2 === 0 ? 'Mock Theme 1' : 'Mock Theme 2',
-      confidence: 0.8
-    }));
+    try {
+      // Initialize classifier agent
+      if (!this.classifierAgent) {
+        this.classifierAgent = new ClassifierAgent();
+        logOperation('node-classifyResponses-agent-initialized', {});
+      }
 
-    return {
-      ...state,
-      classifications
-    };
+      // Invoke agent with state data
+      const result = await this.classifierAgent.invoke({
+        derivedQuestion: state.derivedQuestion,
+        themes: state.themes,
+        responses: state.responses,
+        projectBackground: state.projectBackground
+      });
+
+      // Handle errors from agent
+      if (result.error) {
+        logOperation('node-classifyResponses-error', { error: result.error });
+        return { 
+          ...state, 
+          error: `Classification failed: ${result.error}` 
+        };
+      }
+
+      // Validate result structure
+      if (!result.classifications || !Array.isArray(result.classifications)) {
+        const errorMsg = 'Invalid classification result: missing classifications array';
+        logOperation('node-classifyResponses-invalid-result', { error: errorMsg });
+        return { 
+          ...state, 
+          error: errorMsg 
+        };
+      }
+
+      // Log classification statistics
+      const classificationStats = this.calculateClassificationStats(result.classifications, state.themes);
+      logOperation('node-classifyResponses-success', { 
+        classificationsCount: result.classifications.length,
+        themeDistribution: classificationStats.distribution,
+        averageConfidence: classificationStats.averageConfidence,
+        warnings: result.warnings || []
+      });
+
+      return {
+        ...state,
+        classifications: result.classifications
+      };
+
+    } catch (error) {
+      const errorMsg = `Unexpected error in classification: ${error.message}`;
+      logOperation('node-classifyResponses-unexpected-error', { error: errorMsg, stack: error.stack });
+      return { 
+        ...state, 
+        error: errorMsg 
+      };
+    }
   }
 
   /**
@@ -284,20 +332,68 @@ export class QuestionAnalysisWorkflow {
       classificationCount: state.classifications?.length 
     });
     
-    // MVP placeholder: Create mock quotes
-    const quotes = {
-      theme1: [
-        { quote: 'Mock quote 1', participantId: 'p1', verified: true }
-      ],
-      theme2: [
-        { quote: 'Mock quote 2', participantId: 'p2', verified: true }
-      ]
-    };
+    try {
+      // Initialize quote extractor agent if needed
+      if (!this.quoteExtractorAgent) {
+        this.quoteExtractorAgent = new QuoteExtractorAgent();
+      }
 
-    return {
-      ...state,
-      quotes
-    };
+      // Validate state has required data
+      if (!state.themes || state.themes.length === 0) {
+        throw new Error('No themes available for quote extraction');
+      }
+
+      if (!state.classifications || state.classifications.length === 0) {
+        throw new Error('No classifications available for quote extraction');
+      }
+
+      if (!state.responses || state.responses.length === 0) {
+        throw new Error('No responses available for quote extraction');
+      }
+
+      // Prepare input for quote extraction
+      const extractionInput = {
+        themes: state.themes,
+        classifications: state.classifications,
+        responses: state.responses,
+        derivedQuestion: state.derivedQuestion,
+        projectBackground: state.projectBackground
+      };
+
+      // Extract quotes using the agent
+      const quoteResult = await this.quoteExtractorAgent.invoke(extractionInput);
+      
+      if (quoteResult.error) {
+        console.error('[WORKFLOW] Quote extraction failed:', quoteResult.error);
+        // Return empty quotes structure to allow workflow to continue
+        return {
+          ...state,
+          quotes: {},
+          quoteExtractionError: quoteResult.error
+        };
+      }
+
+      console.log(`[WORKFLOW] Quote extraction completed: ${quoteResult.totalQuotesExtracted} quotes extracted`);
+      
+      return {
+        ...state,
+        quotes: quoteResult.quotes,
+        quoteExtractionStats: {
+          totalQuotes: quoteResult.totalQuotesExtracted,
+          quotesPerTheme: quoteResult.themeQuoteCounts
+        }
+      };
+
+    } catch (error) {
+      console.error('[WORKFLOW] Quote extraction node error:', error);
+      
+      // Return empty quotes to allow workflow to continue
+      return {
+        ...state,
+        quotes: {},
+        quoteExtractionError: error.message
+      };
+    }
   }
 
   /**
@@ -324,6 +420,37 @@ export class QuestionAnalysisWorkflow {
     return {
       ...state,
       summary
+    };
+  }
+
+  /**
+   * Calculate classification statistics for logging
+   * @param {Array} classifications - Classification results
+   * @param {Array} themes - Available themes
+   * @returns {Object} Statistics including distribution and confidence
+   */
+  calculateClassificationStats(classifications, themes) {
+    // Calculate theme distribution
+    const distribution = {};
+    themes.forEach(theme => {
+      distribution[theme.title] = 0;
+    });
+
+    let totalConfidence = 0;
+    classifications.forEach(classification => {
+      if (distribution.hasOwnProperty(classification.theme)) {
+        distribution[classification.theme]++;
+      }
+      totalConfidence += classification.confidence || 0;
+    });
+
+    const averageConfidence = classifications.length > 0 
+      ? (totalConfidence / classifications.length).toFixed(3)
+      : 0;
+
+    return {
+      distribution,
+      averageConfidence: parseFloat(averageConfidence)
     };
   }
 

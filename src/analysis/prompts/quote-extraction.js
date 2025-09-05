@@ -1,24 +1,69 @@
 /**
- * TODO: Quote extraction prompts
+ * Quote extraction prompts
  * 
- * This module contains prompt templates for extracting supporting quotes from responses.
- * Includes specific instructions to prevent hallucination and ensure verbatim accuracy.
+ * This module contains prompt templates for extracting verbatim quotes from participant responses.
+ * Receives themes and classifications from previous pipeline stages.
  */
 
 /**
  * Load quote extraction prompt template
  * @param {string} promptType - Type of prompt to load
  * @param {Object} options - Additional prompt options
- * @returns {string} Formatted prompt template
+ * @returns {Object} Prompt template with system and user parts
  */
 export function loadPrompt(promptType, options = {}) {
-  // TODO: Implement prompt loading logic for quote extraction
-  
   if (promptType === 'quote-extraction') {
-    return getQuoteExtractionPrompt(options);
+    return { template: getQuoteExtractionPrompt(options) };
   }
   
-  throw new Error(`Unknown prompt type: ${promptType}`);
+  if (promptType === 'quote-extraction-retry') {
+    return { template: getQuoteExtractionRetryPrompt(options) };
+  }
+  
+  return { error: `Unknown prompt type: ${promptType}` };
+}
+
+/**
+ * Format quote extraction prompt with input data
+ * @param {string} promptTemplate - The prompt template
+ * @param {Object} input - Input data for quote extraction
+ * @returns {string} Formatted prompt ready for LLM
+ */
+export function formatPrompt(promptTemplate, input) {
+  const { themes, classifications, responses, derivedQuestion, projectBackground, previousErrors } = input;
+  
+  // Extract user responses for context
+  const userResponseSamples = responses.slice(0, 5).map(r => {
+    const userText = extractUserTextFromConversation(r.cleanResponse);
+    return `Participant ${r.participantId}: "${userText.substring(0, 150)}..."`;
+  }).join('\n');
+
+  // Format themes for prompt
+  const themesText = themes.map(theme => 
+    `Theme: "${theme.title}"\nDescription: ${theme.description}\nID: ${theme.id}`
+  ).join('\n\n');
+
+  // Count responses per theme for context
+  const themeDistribution = themes.map(theme => {
+    const count = classifications.filter(c => c.themeId === theme.id).length;
+    return `${theme.title}: ${count} responses`;
+  }).join(', ');
+
+  let formattedPrompt = promptTemplate
+    .replace('{derivedQuestion}', derivedQuestion)
+    .replace('{themes}', themesText)
+    .replace('{totalResponses}', responses.length)
+    .replace('{themeDistribution}', themeDistribution)
+    .replace('{projectBackground}', projectBackground)
+    .replace('{userResponseSamples}', userResponseSamples);
+
+  // Add previous errors for retry prompts
+  if (previousErrors && previousErrors.length > 0) {
+    const errorsText = previousErrors.join('\n- ');
+    formattedPrompt = formattedPrompt.replace('{previousErrors}', errorsText);
+  }
+
+  return formattedPrompt;
 }
 
 /**
@@ -27,174 +72,157 @@ export function loadPrompt(promptType, options = {}) {
  * @returns {string} Quote extraction prompt template
  */
 function getQuoteExtractionPrompt(options = {}) {
-  // TODO: Return comprehensive quote extraction prompt
-  // This prompt is CRITICAL for preventing hallucination
-  // Must emphasize verbatim accuracy and proper attribution
-  
   return `
-    QUOTE EXTRACTION TASK - CRITICAL ACCURACY REQUIRED:
+    VERBATIM QUOTE EXTRACTION TASK:
     
-    Extract VERBATIM quotes that support each theme. This is critical - quotes must be word-for-word from user responses only.
+    Extract exact quotes from participant responses that support each theme.
+    This is critical for thematic analysis accuracy - quotes must be word-for-word from user responses.
     
-    STRICT RULES:
-    1. Extract quotes ONLY from 'user:' portions of conversations
-    2. Quotes must be EXACT, word-for-word matches (no paraphrasing)
-    3. Maximum 3 quotes per theme
-    4. Maximum 1 quote per participant per theme
-    5. Quotes must be substantial (typically >10 words)
-    6. Return exact participant ID for each quote
-    7. If no good quotes exist for a theme, return empty array for that theme
+    CRITICAL RULES:
+    - Extract quotes ONLY from 'user:' portions of conversations (ignore 'assistant:' parts)
+    - Quotes must be VERBATIM - exact word-for-word matches from the source text
+    - Maximum 3 quotes per theme
+    - Maximum 1 quote per participant per theme
+    - Quotes should be substantial (typically >10 words, but prioritize quality over length)
+    - Return exact participant ID for each quote
+    - If no good quotes exist for a theme, return empty array for that theme
     
-    HALLUCINATION PREVENTION:
-    - Copy quotes exactly as written by users
-    - Do not combine words from different parts of a response
-    - Do not create quotes that "capture the essence" - only exact text
-    - If a concept is mentioned but not quotable, don't force a quote
+    QUOTE QUALITY STANDARDS:
+    - Quotes should directly support or illustrate the theme
+    - Choose the most representative and clear quotes
+    - Avoid partial sentences unless they are complete thoughts
+    - Prefer quotes that demonstrate the theme concept clearly
+    - Ensure quotes make sense when read in isolation
     
-    INPUT DATA:
-    - Themes: {themes}
-    - Classifications: {classifications}
-    - Full Responses: {responses}
+    CONTEXT:
+    - Research Question: {derivedQuestion}
+    - Available Themes: {themes}
+    - Total Responses: {totalResponses}
+    - Theme Distribution: {themeDistribution}
+    - Project Background: {projectBackground}
     
-    OUTPUT FORMAT (JSON):
+    SAMPLE USER RESPONSES:
+    {userResponseSamples}
+    
+    OUTPUT FORMAT:
+    Respond with a JSON object where each theme ID maps to an array of quote objects:
+    
     {
-      "quotes": {
-        "theme-id-1": [
-          {
-            "quote": "exact user text here",
-            "participantId": "4434"
-          }
-        ],
-        "theme-id-2": []
-      }
+      "theme_1_id": [
+        {
+          "quote": "exact verbatim text from user response",
+          "participantId": "participant_id_here"
+        }
+      ],
+      "theme_2_id": [
+        {
+          "quote": "another exact verbatim quote",
+          "participantId": "different_participant_id"
+        }
+      ]
     }
     
-    Remember: Better to have fewer accurate quotes than any inaccurate ones.
+    IMPORTANT: 
+    - Only include quotes that exist exactly in the user responses
+    - Double-check that each quote is word-for-word accurate
+    - Include the full participant ID exactly as provided
+    - If no suitable quotes exist for a theme, use an empty array: []
   `;
 }
 
 /**
- * Format quote extraction prompt with actual data
- * @param {string} template - Prompt template string
- * @param {Object} data - Data to insert into template
- * @returns {string} Formatted prompt ready for LLM
+ * Get the retry quote extraction prompt template (includes validation errors)
+ * @param {Object} options - Prompt customization options
+ * @returns {string} Retry quote extraction prompt template
  */
-export function formatPrompt(template, data) {
-  // TODO: Implement prompt formatting for quote extraction
-  // - Format themes with clear structure
-  // - Include classification context for each participant
-  // - Present responses in searchable format
-  // - Include previous errors if retrying
-  
-  let formattedPrompt = template;
-  
-  // Format themes for display
-  if (data.themes) {
-    const themesDisplay = data.themes.map(theme => 
-      `${theme.id}: "${theme.title}" - ${theme.description}`
-    ).join('\n');
-    data.themes = themesDisplay;
-  }
-  
-  // Format classifications to show which participants belong to which themes
-  if (data.classifications) {
-    const classificationsByTheme = {};
-    data.classifications.forEach(classification => {
-      if (!classificationsByTheme[classification.themeId]) {
-        classificationsByTheme[classification.themeId] = [];
-      }
-      classificationsByTheme[classification.themeId].push(classification.participantId);
-    });
+function getQuoteExtractionRetryPrompt(options = {}) {
+  return `
+    QUOTE EXTRACTION RETRY TASK:
     
-    const classificationsDisplay = Object.entries(classificationsByTheme)
-      .map(([themeId, participantIds]) => 
-        `${themeId}: Participants ${participantIds.join(', ')}`
-      ).join('\n');
-    data.classifications = classificationsDisplay;
-  }
-  
-  // Format responses with clear participant identification
-  if (data.responses) {
-    const responsesDisplay = data.responses.map(response => {
-      // Extract only user parts for quote extraction
-      const userOnlyText = extractUserResponsesOnly(response.cleanResponse);
-      return `=== Participant ${response.participantId} ===\nUser responses: ${userOnlyText}`;
-    }).join('\n\n');
-    data.responses = responsesDisplay;
-  }
-  
-  // Add previous errors context if retrying
-  if (data.previousErrors) {
-    const errorsContext = `\nPREVIOUS ERRORS TO AVOID:\n${data.previousErrors.map(error => `- ${error}`).join('\n')}\n`;
-    formattedPrompt = errorsContext + formattedPrompt;
-  }
-  
-  // Replace placeholder variables
-  for (const [key, value] of Object.entries(data)) {
-    const placeholder = `{${key}}`;
-    formattedPrompt = formattedPrompt.replace(new RegExp(placeholder, 'g'), String(value));
-  }
-  
-  return formattedPrompt;
+    The previous quote extraction attempt failed validation. Please extract quotes again,
+    addressing the specific validation errors listed below.
+    
+    VALIDATION ERRORS FROM PREVIOUS ATTEMPT:
+    {previousErrors}
+    
+    CRITICAL RULES (REINFORCED):
+    - Extract quotes ONLY from 'user:' portions of conversations (ignore 'assistant:' parts)
+    - Quotes must be VERBATIM - exact word-for-word matches from the source text
+    - Do NOT paraphrase, summarize, or modify quotes in any way
+    - Do NOT combine text from different parts of the conversation
+    - Maximum 3 quotes per theme
+    - Maximum 1 quote per participant per theme
+    - Quotes should be substantial (typically >10 words, but prioritize accuracy over length)
+    - Return exact participant ID for each quote
+    
+    ACCURACY VERIFICATION:
+    - Before including any quote, verify it exists exactly in the user response
+    - Check that the participant ID matches the source of the quote
+    - Ensure no text is added, removed, or modified from the original
+    - If uncertain about a quote's accuracy, exclude it rather than risk inaccuracy
+    
+    CONTEXT:
+    - Research Question: {derivedQuestion}
+    - Available Themes: {themes}
+    - Total Responses: {totalResponses}
+    - Theme Distribution: {themeDistribution}
+    - Project Background: {projectBackground}
+    
+    SAMPLE USER RESPONSES:
+    {userResponseSamples}
+    
+    OUTPUT FORMAT:
+    Respond with a JSON object where each theme ID maps to an array of quote objects:
+    
+    {
+      "theme_1_id": [
+        {
+          "quote": "exact verbatim text from user response",
+          "participantId": "participant_id_here"
+        }
+      ],
+      "theme_2_id": [
+        {
+          "quote": "another exact verbatim quote",
+          "participantId": "different_participant_id"
+        }
+      ]
+    }
+    
+    FINAL CHECK:
+    Before submitting, verify each quote:
+    1. Exists exactly in a user response (not assistant part)
+    2. Has correct participant ID
+    3. Is not paraphrased or modified
+    4. Supports the theme it's assigned to
+  `;
 }
 
 /**
- * Extract only user responses from conversation format
+ * Extract user text from conversation format
  * @param {string} conversationText - Full conversation text
- * @returns {string} Combined user responses only
+ * @returns {string} User responses only
  */
-function extractUserResponsesOnly(conversationText) {
-  // TODO: Parse conversation format to extract only user parts
-  // - Split on 'assistant:' and 'user:' markers
-  // - Return only text following 'user:' markers
-  // - Join multiple user responses with spaces
+function extractUserTextFromConversation(conversationText) {
+  if (!conversationText || typeof conversationText !== 'string') {
+    return '';
+  }
+
+  // Split by assistant: and user: markers
+  const parts = conversationText.split(/(?:assistant:|user:)/i);
   
-  const parts = conversationText.split(/\n/);
-  const userResponses = [];
-  let isUserSection = false;
-  
-  for (const line of parts) {
-    if (line.includes('user:')) {
-      isUserSection = true;
-      userResponses.push(line.split('user:')[1].trim());
-    } else if (line.includes('assistant:')) {
-      isUserSection = false;
-    } else if (isUserSection && line.trim()) {
-      userResponses.push(line.trim());
+  // Find parts that come after 'user:' markers
+  const userParts = [];
+  for (let i = 0; i < parts.length; i++) {
+    // Check if this part comes after a 'user:' marker
+    const beforeThis = conversationText.substring(0, 
+      conversationText.indexOf(parts[i])
+    ).toLowerCase();
+    
+    if (beforeThis.includes('user:') && !beforeThis.endsWith('assistant:')) {
+      userParts.push(parts[i].trim());
     }
   }
   
-  return userResponses.join(' ');
-}
-
-/**
- * Get retry prompt for failed quote extraction
- * @param {Array} previousErrors - Errors from previous attempt
- * @param {Array} themes - Themes that need quotes
- * @returns {string} Retry prompt with error context
- */
-export function getRetryPrompt(previousErrors, themes) {
-  // TODO: Create retry prompt for quote extraction failures
-  // - Emphasize the specific errors that occurred
-  // - Provide additional guidance on verbatim accuracy
-  // - Show examples of correct vs incorrect quote extraction
-  
-  throw new Error('Not implemented yet');
-}
-
-/**
- * Validate quote extraction prompt output
- * @param {Object} llmOutput - Raw quote output from LLM
- * @param {Array} themes - Available themes
- * @param {Array} responses - Original responses
- * @returns {Object} Validation result with parsed data or errors
- */
-export function validatePromptOutput(llmOutput, themes, responses) {
-  // TODO: Implement quote output validation
-  // - Check quotes structure matches expected format
-  // - Validate participant IDs exist in original data
-  // - Check quote limits (max 3 per theme, 1 per participant per theme)
-  // - Prepare data for hallucination validation
-  
-  throw new Error('Not implemented yet');
+  return userParts.filter(part => part.length > 0).join(' ');
 }

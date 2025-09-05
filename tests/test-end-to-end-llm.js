@@ -199,7 +199,7 @@ async function runEndToEndLLMTest() {
     });
     
     console.log('\n🚀 Executing LangGraph workflow with LLM agents...');
-    console.log('⏱️  This may take 30-60 seconds due to LLM API calls...');
+    console.log('⏱️  This may take 60-120 seconds due to 2 LLM API calls (themes + classification)...');
     
     // Execute workflow
     const finalState = await workflow.runAnalysis(initialState);
@@ -259,10 +259,25 @@ async function runEndToEndLLMTest() {
       console.log('  ❌ No validation results');
     }
     
-    // 5.3: Classifications (Mock - will be LLM in future)
-    console.log('\n🏷️  CLASSIFICATION RESULTS (Mock - Future LLM):');
+    // 5.3: Classifications (Real LLM)
+    console.log('\n🏷️  CLASSIFICATION RESULTS (LLM):');
     if (finalState.classifications) {
-      console.log(`  📊 Classified ${finalState.classifications.length} responses`);
+      console.log(`  📊 Classified ${finalState.classifications.length} responses using real LLM`);
+      
+      // Calculate confidence statistics
+      const confidenceScores = finalState.classifications
+        .map(c => c.confidence)
+        .filter(c => c !== undefined);
+      
+      if (confidenceScores.length > 0) {
+        const avgConfidence = (confidenceScores.reduce((a, b) => a + b, 0) / confidenceScores.length).toFixed(3);
+        const minConfidence = Math.min(...confidenceScores).toFixed(3);
+        const maxConfidence = Math.max(...confidenceScores).toFixed(3);
+        
+        console.log(`  🎯 Confidence Statistics:`);
+        console.log(`    • Average: ${avgConfidence}`);
+        console.log(`    • Range: ${minConfidence} - ${maxConfidence}`);
+      }
       
       // Show classification distribution
       const classificationCounts = {};
@@ -276,10 +291,15 @@ async function runEndToEndLLMTest() {
         console.log(`    • ${theme}: ${count} responses (${percentage}%)`);
       });
       
-      // Show sample classifications
+      // Show sample classifications with confidence and reasoning
       console.log('\n  🔍 Sample Classifications:');
       finalState.classifications.slice(0, 3).forEach((c, index) => {
-        console.log(`    [${index + 1}] Participant ${c.participantId} → ${c.theme} (confidence: ${c.confidence})`);
+        console.log(`    [${index + 1}] Participant ${c.participantId}:`);
+        console.log(`        → Theme: ${c.theme}`);
+        console.log(`        → Confidence: ${c.confidence}`);
+        if (c.reasoning) {
+          console.log(`        → Reasoning: ${c.reasoning.substring(0, 100)}...`);
+        }
       });
     } else {
       console.log('  ❌ No classifications generated');
@@ -322,15 +342,15 @@ async function runEndToEndLLMTest() {
     console.log(`  ✅ Question Selection: ${selectedQuestionId} (${selectedResponses.length} responses)`);
     console.log(`  ${finalState.themes ? '✅' : '❌'} Theme Generation (LLM): ${finalState.themes?.length || 0} themes`);
     console.log(`  ${finalState.themeValidation?.passed ? '✅' : '❌'} Theme Validation: ${finalState.themeValidation?.passed ? 'PASSED' : 'FAILED'}`);
-    console.log(`  ${finalState.classifications ? '✅' : '❌'} Classifications (Mock): ${finalState.classifications?.length || 0} items`);
+    console.log(`  ${finalState.classifications ? '✅' : '❌'} Classifications (LLM): ${finalState.classifications?.length || 0} items`);
     console.log(`  ${finalState.quotes ? '✅' : '❌'} Quote Extraction (Mock): Available`);
     console.log(`  ${finalState.summary ? '✅' : '❌'} Summary Generation (Mock): Available`);
     
     console.log('\n🎯 LLM Integration Status:');
     console.log('  🤖 Theme Generation: ✅ REAL LLM');
     console.log('  🛡️  Theme Validation: ✅ IMPLEMENTED');
-    console.log('  🏷️  Classification: ⏳ Mock (Next: Real LLM)');
-    console.log('  💬 Quote Extraction: ⏳ Mock (Future: Real LLM)');
+    console.log('  🏷️  Classification: ✅ REAL LLM');
+    console.log('  💬 Quote Extraction: ⏳ Mock (Next: Real LLM)');
     console.log('  📝 Summary Generation: ⏳ Mock (Future: Real LLM)');
     
     return {
@@ -365,7 +385,7 @@ async function runEndToEndLLMTest() {
 if (import.meta.url === `file://${process.argv[1]}`) {
   console.log('🚨 WARNING: This test makes REAL LLM API calls and may incur costs!');
   console.log('🔑 Ensure your OpenAI API key is properly configured.');
-  console.log('⏳ Expected duration: 30-60 seconds for LLM processing.');
+  console.log('⏳ Expected duration: 60-120 seconds for 2 LLM API calls (theme generation + classification).');
   
   // Add a small delay to let user read the warning
   setTimeout(async () => {

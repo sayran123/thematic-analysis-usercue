@@ -1,106 +1,311 @@
 /**
- * TODO: LLM: Classify responses to themes
+ * LLM: Classify responses to themes
  * 
  * This agent classifies participant responses to generated themes.
  * Receives themes and derived question from the theme generation stage.
  */
 
-// TODO: Add necessary imports
-// import { loadPrompt, formatPrompt } from '../prompts/classification.js';
-// import { llm } from '../../utils/config/llm-config.js';
+import { loadPrompt, formatPrompt } from '../prompts/classification.js';
+import { initializeLLM, createMessages, invokeLLM, parseLLMResponse } from '../../utils/config/llm-config.js';
 
 /**
  * Classification Agent class
  */
 export class ClassifierAgent {
   constructor() {
-    // TODO: Initialize LLM configuration
+    this.llm = null; // Initialize lazily
     this.prompt = null; // Will load from prompts/classification.js
   }
 
   /**
    * Classify participant responses to themes
    * @param {Object} input - Input data containing derivedQuestion, themes, responses, projectBackground
-   * @returns {Promise<Array>} Array of classification objects
+   * @returns {Promise<Object>} Result with classifications array or error
    */
   async invoke(input) {
-    // TODO: Implement classification logic
-    // - Load classification prompt template
-    // - Format prompt with themes, responses, and derived question
-    // - Call LLM API to classify each response
-    // - Parse and validate classification results
-    // - Return structured classifications
-    
-    const { derivedQuestion, themes, responses, projectBackground } = input;
-    
-    // Expected output format:
-    // [
-    //   {
-    //     participantId: "4434",
-    //     questionId: "vpn_selection",
-    //     themeId: "privacy-policies",
-    //     theme: "Privacy and No-Logs Policies",
-    //     confidence: 0.85
-    //   }
-    // ]
-    
-    throw new Error('Not implemented yet');
+    try {
+      // Validate input
+      const validation = this.validateInput(input);
+      if (validation.error) {
+        return { error: validation.error };
+      }
+
+      // Initialize LLM if needed (with higher token limit for classification)
+      if (!this.llm) {
+        const llmResult = await initializeLLM({ maxTokens: 12000 }); // Even higher limit for 106 classifications
+        if (llmResult.error) {
+          return { error: `LLM initialization failed: ${llmResult.error}` };
+        }
+        this.llm = llmResult.llm;
+      }
+
+      // Load prompt template if needed
+      if (!this.prompt) {
+        const promptResult = loadPrompt('classification');
+        if (promptResult.error) {
+          return { error: `Prompt loading failed: ${promptResult.error}` };
+        }
+        this.prompt = promptResult.template;
+      }
+
+      const { derivedQuestion, themes, responses, projectBackground } = input;
+      
+      // Extract user responses only from conversation format
+      const userResponses = responses.map(r => ({
+        participantId: r.participantId,
+        questionId: r.questionId,
+        cleanResponse: r.cleanResponse,
+        userOnly: this.extractUserResponse(r.cleanResponse)
+      })).filter(r => r.userOnly);
+      
+      if (userResponses.length === 0) {
+        return { error: 'No valid user responses found in conversations' };
+      }
+
+      // For reliability, always use smaller batches for large datasets (>25)
+      if (userResponses.length > 25) {
+        console.log(`[CLASSIFIER] Using batch processing for ${userResponses.length} responses`);
+        return await this.processInBatches(themes, userResponses, derivedQuestion, projectBackground);
+      }
+
+      // Try single batch processing for smaller datasets
+      const batchResult = await this.processBatch(
+        themes, 
+        userResponses, 
+        derivedQuestion, 
+        projectBackground
+      );
+
+      if (batchResult.error && (batchResult.error.includes('token') || batchResult.error.includes('JSON') || batchResult.error.includes('Unterminated'))) {
+        // Fallback to smaller batches if token limit exceeded or JSON parsing fails
+        console.log('[CLASSIFIER] Single batch failed, falling back to smaller batches');
+        return await this.processInBatches(themes, userResponses, derivedQuestion, projectBackground);
+      }
+
+      return batchResult;
+
+    } catch (error) {
+      return { error: `Classification failed: ${error.message}` };
+    }
   }
 
   /**
-   * Classify a single response to themes
-   * @param {Object} response - Single participant response
+   * Process all responses in a single batch
    * @param {Array} themes - Available themes
+   * @param {Array} responses - User responses to classify
    * @param {string} derivedQuestion - Research question context
-   * @returns {Promise<Object>} Classification result
+   * @param {string} projectBackground - Project context
+   * @returns {Promise<Object>} Classification result or error
    */
-  async classifySingleResponse(response, themes, derivedQuestion) {
-    // TODO: Implement single response classification
-    throw new Error('Not implemented yet');
+  async processBatch(themes, responses, derivedQuestion, projectBackground) {
+    try {
+      // Format the prompt with all data
+      const formattedPrompt = formatPrompt(this.prompt, {
+        themes: themes,
+        responses: responses,
+        derivedQuestion: derivedQuestion,
+        projectBackground: projectBackground,
+        responseCount: responses.length,
+        questionId: responses[0]?.questionId || 'unknown'
+      });
+
+      // Create messages for LLM
+      const messages = createMessages(formattedPrompt.systemPrompt, formattedPrompt.userPrompt);
+
+      // Call LLM API
+      const llmResult = await invokeLLM(this.llm, messages);
+      if (llmResult.error) {
+        return { error: `LLM API call failed: ${llmResult.error}` };
+      }
+      
+      // Parse and validate the response
+      const parsedResult = await this.parseLLMResponse(llmResult.content, responses, themes);
+      if (parsedResult.error) {
+        return parsedResult;
+      }
+
+      return { classifications: parsedResult.classifications };
+
+    } catch (error) {
+      return { error: `Batch processing failed: ${error.message}` };
+    }
+  }
+
+  /**
+   * Process responses in smaller batches if single batch fails
+   * @param {Array} themes - Available themes
+   * @param {Array} responses - User responses to classify
+   * @param {string} derivedQuestion - Research question context
+   * @param {string} projectBackground - Project context
+   * @returns {Promise<Object>} Combined classification result or error
+   */
+  async processInBatches(themes, responses, derivedQuestion, projectBackground, batchSize = 25) {
+    try {
+      const allClassifications = [];
+      const totalBatches = Math.ceil(responses.length / batchSize);
+      
+      console.log(`[CLASSIFIER] Processing ${responses.length} responses in ${totalBatches} batches of ${batchSize}`);
+      
+      for (let i = 0; i < responses.length; i += batchSize) {
+        const batch = responses.slice(i, i + batchSize);
+        const batchNum = Math.floor(i / batchSize) + 1;
+        
+        console.log(`[CLASSIFIER] Processing batch ${batchNum}/${totalBatches} (${batch.length} responses)`);
+        
+        let batchResult = await this.processBatch(
+          themes, 
+          batch, 
+          derivedQuestion, 
+          projectBackground
+        );
+        
+        // Retry once if we get incomplete results
+        if (batchResult.classifications && batchResult.classifications.length !== batch.length) {
+          console.log(`[CLASSIFIER] Batch ${batchNum} incomplete (${batchResult.classifications.length}/${batch.length}), retrying...`);
+          
+          batchResult = await this.processBatch(
+            themes, 
+            batch, 
+            derivedQuestion, 
+            projectBackground
+          );
+        }
+        
+        if (batchResult.error) {
+          return { error: `Batch ${batchNum} failed: ${batchResult.error}` };
+        }
+        
+        if (!batchResult.classifications || batchResult.classifications.length !== batch.length) {
+          return { error: `Batch ${batchNum} returned ${batchResult.classifications?.length || 0} classifications, expected ${batch.length}` };
+        }
+        
+        allClassifications.push(...batchResult.classifications);
+        console.log(`[CLASSIFIER] Batch ${batchNum} complete: ${batchResult.classifications.length} classifications`);
+      }
+
+      console.log(`[CLASSIFIER] All batches complete: ${allClassifications.length} total classifications`);
+      return { classifications: allClassifications };
+
+    } catch (error) {
+      return { error: `Batch processing failed: ${error.message}` };
+    }
   }
 
   /**
    * Validate classification input
    * @param {Object} input - Input to validate
-   * @returns {boolean} True if input is valid
+   * @returns {Object} Validation result with error if invalid
    */
   validateInput(input) {
-    // TODO: Implement input validation
-    // - Check required fields exist
-    // - Validate themes array
-    // - Validate responses array
-    // - Check derivedQuestion exists
-    
-    throw new Error('Not implemented yet');
+    if (!input) {
+      return { error: 'Input is required' };
+    }
+
+    if (!input.derivedQuestion || typeof input.derivedQuestion !== 'string') {
+      return { error: 'Valid derivedQuestion is required' };
+    }
+
+    if (!input.themes || !Array.isArray(input.themes)) {
+      return { error: 'Themes array is required' };
+    }
+
+    if (input.themes.length === 0) {
+      return { error: 'At least one theme is required' };
+    }
+
+    if (!input.responses || !Array.isArray(input.responses)) {
+      return { error: 'Responses array is required' };
+    }
+
+    if (input.responses.length === 0) {
+      return { error: 'At least one response is required' };
+    }
+
+    if (!input.projectBackground || typeof input.projectBackground !== 'string') {
+      return { error: 'Project background is required' };
+    }
+
+    // Validate theme structure
+    for (const theme of input.themes) {
+      if (!theme.id || !theme.title || !theme.description) {
+        return { error: 'Each theme must have id, title, and description' };
+      }
+    }
+
+    return { valid: true };
   }
 
   /**
-   * Parse LLM classification response
+   * Extract user response from conversation format
+   * @param {string} conversationText - Full conversation text
+   * @returns {string} User response only
+   */
+  extractUserResponse(conversationText) {
+    if (!conversationText) return '';
+    
+    // Split by user: markers and extract user parts
+    const parts = conversationText.split(/user:\s*/);
+    const userParts = parts.slice(1); // Skip first part (before first user:)
+    
+    // Join user responses and clean up
+    return userParts.map(part => {
+      // Remove any subsequent assistant: parts
+      return part.split(/assistant:\s*/)[0].trim();
+    }).filter(Boolean).join(' ');
+  }
+
+  /**
+   * Parse LLM response into structured format
    * @param {string} llmResponse - Raw LLM response
-   * @param {Object} originalResponse - Original response being classified
-   * @returns {Object} Parsed classification result
-   */
-  parseClassificationResponse(llmResponse, originalResponse) {
-    // TODO: Implement response parsing
-    // - Parse classification result
-    // - Validate theme assignment
-    // - Calculate confidence score
-    
-    throw new Error('Not implemented yet');
-  }
-
-  /**
-   * Validate classification results
-   * @param {Array} classifications - Classification results to validate
+   * @param {Array} originalResponses - Original responses that were classified
    * @param {Array} themes - Available themes
-   * @returns {Object} Validation result with errors and warnings
+   * @returns {Promise<Object>} Parsed classification result
    */
-  validateClassifications(classifications, themes) {
-    // TODO: Implement classification validation
-    // - Check all responses are classified
-    // - Validate theme assignments
-    // - Check for classification distribution
-    
-    throw new Error('Not implemented yet');
+  async parseLLMResponse(llmResponse, originalResponses, themes) {
+    try {
+      // Clean and parse LLM response (handle markdown code blocks and escape sequences)
+      let cleanedResponse = llmResponse;
+      if (typeof llmResponse === 'string') {
+        // Remove markdown code blocks if present
+        cleanedResponse = llmResponse
+          .replace(/```json\s*/g, '')
+          .replace(/```\s*/g, '')
+          .trim();
+        
+        // Log response length for monitoring
+        console.log(`[CLASSIFIER] LLM Response length: ${cleanedResponse.length}`);
+      }
+      
+      // Try to parse as JSON
+      let parsed;
+      if (typeof cleanedResponse === 'string') {
+        parsed = JSON.parse(cleanedResponse);
+      } else {
+        parsed = cleanedResponse;
+      }
+
+      // Validate using prompt validation function
+      const classificationPrompts = await import('../prompts/classification.js');
+      const validationResult = classificationPrompts.validatePromptOutput(parsed, originalResponses, themes);
+      
+      if (validationResult.error) {
+        return { error: validationResult.error };
+      }
+
+      if (!validationResult.passed) {
+        return { 
+          error: `Classification validation failed: ${validationResult.errors.join(', ')}`,
+          warnings: validationResult.warnings
+        };
+      }
+
+      return {
+        classifications: validationResult.classifications,
+        warnings: validationResult.warnings
+      };
+
+    } catch (error) {
+      return { error: `Failed to parse LLM response: ${error.message}` };
+    }
   }
 }

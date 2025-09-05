@@ -145,12 +145,22 @@ export class ThemeGeneratorAgent {
    */
   parseLLMResponse(llmResponse) {
     try {
-      // Try to parse as JSON first
-      let parsed;
+      // Clean and parse LLM response (handle markdown code blocks)
+      let cleanedResponse = llmResponse;
       if (typeof llmResponse === 'string') {
-        parsed = JSON.parse(llmResponse);
+        // Remove markdown code blocks if present
+        cleanedResponse = llmResponse
+          .replace(/```json\s*/g, '')
+          .replace(/```\s*/g, '')
+          .trim();
+      }
+      
+      // Try to parse as JSON
+      let parsed;
+      if (typeof cleanedResponse === 'string') {
+        parsed = JSON.parse(cleanedResponse);
       } else {
-        parsed = llmResponse;
+        parsed = cleanedResponse;
       }
 
       // Validate required fields

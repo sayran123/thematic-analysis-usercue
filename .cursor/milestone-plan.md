@@ -419,13 +419,13 @@ This document outlines the incremental development plan for the thematic analysi
 | Week | Milestone | Focus | Key Testing | Status |
 |------|-----------|-------|-------------|---------|
 | 1 | 1.1-1.4 | Phase 1 Data Foundation | End-to-end pipeline with real data | 1.1 ✅ 1.2 ✅ 1.3 ✅ 1.4 ✅ Complete |
-| 2 | 2.1-2.2 | LLM Integration | Single question theme generation | Ready to start |
-| 3 | 2.1-2.2 | LLM + Themes | Single question theme generation | |
-| 4 | 2.3-2.4 | Validation + Classification | Pipeline through classification | |
-| 5 | 2.5-2.6 | Quote System | Quote extraction with validation | |
-| 6 | 2.7-3.1 | Complete Pipeline + Output | End-to-end single question | |
-| 7 | 3.2-4.1 | Full Output Suite + Parallel | Complete single question validation | |
-| 8 | 4.2-4.3 | Multi-Question + Production | Full dataset testing | |
+| 1 | 2.1 | LLM Foundation & Pipeline Structure | LangGraph workflow + LLM connectivity | ✅ Complete |
+| 2 | 2.2 | Theme Generator Agent | Single question theme generation | Ready to start |
+| 3 | 2.3-2.4 | Validation + Classification | Pipeline through classification | |
+| 4 | 2.5-2.6 | Quote System | Quote extraction with validation | |
+| 5 | 2.7-3.1 | Complete Pipeline + Output | End-to-end single question | |
+| 6 | 3.2-4.1 | Full Output Suite + Parallel | Complete single question validation | |
+| 7 | 4.2-4.3 | Multi-Question + Production | Full dataset testing | |
 
 ## Success Criteria for Each Phase
 
@@ -574,21 +574,59 @@ This document outlines the incremental development plan for the thematic analysi
 - Consider proceeding to Milestone 2.1: LLM Foundation & Basic Pipeline Structure
 
 ### 🔧 Usage for Future Development
+### **Key Learnings from Milestone 2.1: LLM Foundation & Basic Pipeline Structure**
+
+#### 🎯 **MVP Approach Proven Effective Again**
+1. **Simplification Over Engineering**: Chose simple GPT-4o-mini configuration over complex retry systems
+   - Result: Working LLM integration in minimal time with clean, maintainable code
+   - Learning: Complex features can be added later - focus on working foundation first
+
+2. **LangGraph State Machine Success**: Built working 4-stage workflow with proper state management
+   - Pattern: Start with mock implementations to validate architecture before adding complexity
+   - Success: End-to-end state transitions working in 16ms with 100% stage completion
+
+3. **Error-Return Pattern Consistency**: Maintained error-return pattern throughout LLM integration
+   - Benefit: Clean error handling without exceptions, consistent with Phase 1 architecture
+   - Reusable: Pattern works well for both data processing and LLM operations
+
+#### 🧪 **Test-First Approach Continued Success**
+1. **Comprehensive Test Coverage**: Created 3 test suites before real implementation
+   - LLM connectivity tests with proper error handling validation
+   - Basic workflow tests demonstrating complete state machine execution
+   - Phase 1→2 integration tests confirming data flow compatibility
+
+2. **Real Testing Strategy**: Used actual Phase 1 data structures for integration validation
+   - Prevented integration issues that mock data would have missed
+   - Confidence in pipeline compatibility before adding real LLM calls
+
+#### 🏗️ **Architecture Patterns Established**
+1. **State Management**: LangGraph Annotation pattern for type-safe state definitions
+2. **Message Creation**: Simple LangChain message objects for LLM communication
+3. **Configuration Management**: Environment-driven configuration with graceful fallbacks
+4. **Parallel Processing Ready**: State machine architecture supports multiple question workflows
+
+#### 📦 **Dependency Strategy**
+1. **Minimal Dependencies**: Added only essential LangChain packages (@langchain/openai, @langchain/core, @langchain/langgraph)
+2. **Security First**: Enhanced .gitignore to protect environment variables and API keys
+3. **Clean Git Hygiene**: Proper exclusion of node_modules and package-lock.json
+
 This updated milestone plan now includes:
 - ✅ Completion tracking and status indicators
-- 📚 Implementation learnings and successful patterns
+- 📚 Implementation learnings and successful patterns from Phases 1 & 2.1
 - 🎯 Specific guidance for replicating successful approaches
 - ⚠️ Risk mitigation strategies based on actual experience
+- 🚀 **NEW**: LLM integration patterns and MVP simplification strategies
 
 Use this document to:
 1. **Reference successful patterns** when implementing new milestones
 2. **Track progress** and update status as milestones complete
 3. **Guide decision-making** using lessons learned from previous work
 4. **Maintain consistency** in testing and validation approaches
+5. **Apply MVP principles** to avoid overengineering in future LLM agent implementations
 
 ---
 
-*This milestone plan is a living document. Updated with completion of Milestones 1.1, 1.2, 1.3, and 1.4 - continue updating as project progresses.*
+*This milestone plan is a living document. Updated with completion of Milestones 1.1, 1.2, 1.3, 1.4, and 2.1 - continue updating as project progresses.*
 
 ## Major Achievements to Date
 
@@ -600,8 +638,16 @@ Use this document to:
 - ✅ **Pipeline Excellence**: Complete end-to-end data processing with statistics and validation
 - ✅ **Feature Branch Success**: Git workflow with feature branches and clean merges established
 
-🚀 **Ready for Phase 2**: LLM Integration & Single Question Analysis Pipeline
-- Complete data pipeline validated and ready
-- Responses grouped by question for parallel LLM processing
-- 100% conversation format preserved for analysis
-- Comprehensive statistics and quality metrics available
+🚀 **Phase 2 LLM Foundation Complete (Week 1)**
+- ✅ **MVP LLM Configuration**: Simple GPT-4o-mini integration without overengineering
+- ✅ **Working LangGraph State Machine**: 4-stage workflow with proper state management 
+- ✅ **Comprehensive Testing**: LLM connectivity, workflow execution, and integration validation
+- ✅ **Architecture Consistency**: Error-return pattern maintained throughout LLM integration
+- ✅ **Security & Git Hygiene**: Enhanced .gitignore, clean dependency management
+- ✅ **Test Results**: 100% test pass rate - LLM connectivity, workflow execution (16ms), error handling, Phase 1 integration
+
+🎯 **Ready for Phase 2.2**: Theme Generator Agent Implementation
+- LLM foundation established and validated
+- State machine ready for real agent implementations  
+- Phase 1 data flows correctly into LangGraph workflow
+- MVP patterns proven effective for rapid, reliable development

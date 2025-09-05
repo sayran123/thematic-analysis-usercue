@@ -8,6 +8,7 @@
 import { extractDataFromExcel } from './data/extractors/excel-extractor.js';
 import { parseAndCleanResponses } from './data/parsers/response-parser.js';
 import { QuestionAnalysisWorkflow } from './analysis/workflows/question-analyzer.js';
+import { ParallelOrchestrator } from './analysis/workflows/parallel-orchestrator.js';
 import { generateMainResults } from './outputs/generators/json-generator.js';
 import { generateClassificationFiles } from './outputs/generators/excel-generator.js';
 import { generateExecutiveSummary } from './outputs/generators/summary-generator.js';
@@ -188,42 +189,27 @@ export class ThematicAnalysisPipeline {
     console.log('🧠 Running thematic analysis...');
     
     try {
-      const analysisResults = [];
-      const workflow = new QuestionAnalysisWorkflow();
+      // Initialize parallel orchestrator
+      const parallelOrchestrator = new ParallelOrchestrator();
       
-      console.log(`- Analyzing ${cleanedData.questions.length} questions sequentially...`);
+      console.log(`- Analyzing ${cleanedData.questions.length} questions in parallel...`);
       
-      // Process each question individually (Phase 3 approach)
-      for (const question of cleanedData.questions) {
-        console.log(`  → Processing: ${question.questionId}`);
-        
-        const questionResponses = cleanedData.responsesByQuestion[question.questionId] || [];
-        
-        if (questionResponses.length === 0) {
-          console.warn(`    ⚠️ No responses found for ${question.questionId}`);
-          continue;
-        }
-        
-        const initialState = {
-          question,
-          responses: questionResponses,
-          projectBackground: cleanedData.projectBackground,
-          stats: cleanedData.questionStats[question.questionId]
-        };
-        
-        const result = await workflow.runAnalysis(initialState);
-        
-        if (result.error) {
-          return { error: `Analysis failed for ${question.questionId}: ${result.error}` };
-        }
-        
-        analysisResults.push(result);
-        console.log(`    ✅ Completed ${question.questionId} (${result.themes?.length || 0} themes)`);
+      // Run all questions concurrently (Phase 4 parallel processing)
+      const analysisResults = await parallelOrchestrator.parallelThematicAnalysis(cleanedData);
+      
+      // Handle errors from parallel processing
+      if (analysisResults.error) {
+        return { error: `Parallel analysis failed: ${analysisResults.error}` };
       }
       
-      console.log('✅ Thematic analysis completed');
+      // Validate we got results
+      if (!Array.isArray(analysisResults) || analysisResults.length === 0) {
+        return { error: 'No analysis results returned from parallel processing' };
+      }
       
-      // Log summary of results
+      console.log('✅ Parallel thematic analysis completed');
+      
+      // Log summary of results (matching original format for output generators)
       analysisResults.forEach((result, index) => {
         console.log(`  Question ${index + 1}: "${result.derivedQuestion}"`);
         console.log(`    - Themes: ${result.themes ? result.themes.length : 0}`);
@@ -231,8 +217,11 @@ export class ThematicAnalysisPipeline {
       });
       
       logOperation('analysis-completed', { 
+        processingMode: 'parallel',
         totalQuestions: analysisResults.length,
-        totalThemes: analysisResults.reduce((sum, r) => sum + (r.themes?.length || 0), 0)
+        totalThemes: analysisResults.reduce((sum, r) => sum + (r.themes?.length || 0), 0),
+        averageThemesPerQuestion: analysisResults.length > 0 ? 
+          (analysisResults.reduce((sum, r) => sum + (r.themes?.length || 0), 0) / analysisResults.length).toFixed(1) : 0
       });
       
       return analysisResults;

@@ -123,7 +123,15 @@ export class QuestionAnalysisWorkflow {
         hasSummary: !!finalState.summary
       });
 
-      return finalState;
+      // Ensure questionId and participantCount are included in the final result
+      const result = {
+        ...finalState,
+        questionId: finalState.question?.questionId,
+        participantCount: finalState.responses?.length || 0,
+        derivedQuestion: finalState.derivedQuestion
+      };
+
+      return result;
       
     } catch (error) {
       const errorMsg = `Workflow execution failed: ${error.message}`;

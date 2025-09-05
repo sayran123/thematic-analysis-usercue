@@ -171,15 +171,15 @@ export async function getFileStats(filePath) {
 /**
  * Ensure directory exists, create if necessary
  * @param {string} dirPath - Directory path
- * @returns {Promise<void>}
+ * @returns {Promise<{success: boolean, error?: string}>}
  */
 export async function ensureDirectoryExists(dirPath) {
-  // TODO: Implement directory creation
   try {
-    // await fs.mkdir(dirPath, { recursive: true, mode: FS_CONFIG.DIRECTORIES.PERMISSIONS });
+    await fs.mkdir(dirPath, { recursive: true });
     console.log(`Ensuring directory exists: ${dirPath}`);
+    return { success: true };
   } catch (error) {
-    throw new Error(`Failed to create directory ${dirPath}: ${error.message}`);
+    return { error: `Failed to create directory ${dirPath}: ${error.message}` };
   }
 }
 

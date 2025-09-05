@@ -313,12 +313,14 @@ export class QuestionAnalysisWorkflow {
         classificationsCount: result.classifications.length,
         themeDistribution: classificationStats.distribution,
         averageConfidence: classificationStats.averageConfidence,
+        qualityMetrics: result.qualityMetrics || {},
         warnings: result.warnings || []
       });
 
       return {
         ...state,
-        classifications: result.classifications
+        classifications: result.classifications,
+        classificationQualityMetrics: result.qualityMetrics
       };
 
     } catch (error) {
@@ -343,22 +345,40 @@ export class QuestionAnalysisWorkflow {
     });
     
     try {
-      // Initialize quote extractor agent if needed
-      if (!this.quoteExtractorAgent) {
-        this.quoteExtractorAgent = new QuoteExtractorAgent();
-      }
-
-      // Validate state has required data
+      // Validate state has required data - with graceful degradation
       if (!state.themes || state.themes.length === 0) {
-        throw new Error('No themes available for quote extraction');
+        console.warn('[WORKFLOW] Quote extraction skipped: No themes available');
+        return {
+          ...state,
+          quotes: {},
+          quoteExtractionSkipped: true,
+          quoteExtractionReason: 'No themes available'
+        };
       }
 
       if (!state.classifications || state.classifications.length === 0) {
-        throw new Error('No classifications available for quote extraction');
+        console.warn('[WORKFLOW] Quote extraction skipped: No classifications available');
+        return {
+          ...state,
+          quotes: {},
+          quoteExtractionSkipped: true,
+          quoteExtractionReason: 'No classifications available - classification step may have failed'
+        };
       }
 
       if (!state.responses || state.responses.length === 0) {
-        throw new Error('No responses available for quote extraction');
+        console.warn('[WORKFLOW] Quote extraction skipped: No responses available');
+        return {
+          ...state,
+          quotes: {},
+          quoteExtractionSkipped: true,
+          quoteExtractionReason: 'No responses available'
+        };
+      }
+
+      // Initialize quote extractor agent if needed
+      if (!this.quoteExtractorAgent) {
+        this.quoteExtractorAgent = new QuoteExtractorAgent();
       }
 
       // Prepare input for quote extraction

@@ -95,8 +95,9 @@ export class SummarizerAgent {
       return { error: 'themes must be a non-empty array' };
     }
 
-    if (!Array.isArray(classifications) || classifications.length === 0) {
-      return { error: 'classifications must be a non-empty array' };
+    // Classifications are optional - summarizer can work with just themes
+    if (classifications && !Array.isArray(classifications)) {
+      return { error: 'classifications must be an array if provided' };
     }
 
     if (!stats || typeof stats !== 'object') {

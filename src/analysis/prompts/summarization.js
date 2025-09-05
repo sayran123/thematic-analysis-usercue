@@ -91,19 +91,25 @@ export function formatPrompt(template, data) {
   let formattedPrompt = template;
   
   // Format themes with participation statistics
-  if (data.themes && data.classifications) {
-    const themeStats = calculateThemeStatistics(data.themes, data.classifications);
-    const themesDisplay = data.themes.map(theme => {
-      const stats = themeStats[theme.id] || { count: 0, percentage: 0 };
-      return `"${theme.title}": ${stats.count} participants (${stats.percentage}%) - ${theme.description}`;
-    }).join('\n');
+  if (data.themes) {
+    let themesDisplay;
     
-    // Create a copy to avoid modifying original data
-    const formattedData = { ...data };
-    formattedData.themes = themesDisplay;
+    if (data.classifications && data.classifications.length > 0) {
+      // Use classification statistics if available
+      const themeStats = calculateThemeStatistics(data.themes, data.classifications);
+      themesDisplay = data.themes.map(theme => {
+        const stats = themeStats[theme.id] || { count: 0, percentage: 0 };
+        return `"${theme.title}": ${stats.count} participants (${stats.percentage}%) - ${theme.description}`;
+      }).join('\n');
+    } else {
+      // Use themes without participation statistics
+      themesDisplay = data.themes.map(theme => 
+        `"${theme.title}": Participation statistics unavailable - ${theme.description}`
+      ).join('\n');
+    }
     
     // Replace themes placeholder
-    formattedPrompt = formattedPrompt.replace('{themes}', formattedData.themes);
+    formattedPrompt = formattedPrompt.replace('{themes}', themesDisplay);
   }
   
   // Format statistics for display
@@ -113,7 +119,7 @@ export function formatPrompt(template, data) {
   }
   
   // Format classifications as theme distribution percentages
-  if (data.classifications) {
+  if (data.classifications && data.classifications.length > 0) {
     const totalClassifications = data.classifications.length;
     const classificationCounts = {};
     
@@ -131,6 +137,9 @@ export function formatPrompt(template, data) {
       .join('\n');
     
     formattedPrompt = formattedPrompt.replace('{classifications}', classificationsDisplay);
+  } else {
+    // Handle missing classifications
+    formattedPrompt = formattedPrompt.replace('{classifications}', 'Classification data unavailable - classification step may have failed');
   }
   
   // Replace remaining placeholder variables

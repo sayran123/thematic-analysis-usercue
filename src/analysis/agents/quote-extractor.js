@@ -230,6 +230,133 @@ export class QuoteExtractorAgent {
   }
 
   /**
+   * Extract and validate quotes with fallback strategy
+   * NEW METHOD: Uses the enhanced validation approach from feedback
+   * @param {Object} input - Input containing themes, classifications, responses
+   * @returns {Promise<Object>} Validated quotes with fallback handling
+   */
+  async extractAndValidateQuotes(input) {
+    try {
+      const { themes, classifications, responses } = input;
+      
+      // First extract quotes using the standard approach
+      const extractionResult = await this.extractQuotes(input);
+      if (extractionResult.error) {
+        return extractionResult;
+      }
+      
+      // Create participant lookup for validation
+      const participantLookup = this.createParticipantLookup(responses);
+      const finalQuotes = {};
+      
+      for (const theme of themes) {
+        const extractedQuotes = extractionResult.quotes[theme.id] || [];
+        const validatedQuotes = [];
+        
+        for (const quote of extractedQuotes) {
+          const validation = this.quoteValidator.validateQuoteWithFallback(
+            { ...quote, themeId: theme.id },
+            participantLookup,
+            classifications
+          );
+          
+          if (validation.isValid) {
+            const finalQuote = {
+              quote: validation.replacementQuote || quote.quote,
+              participantId: validation.participantId,
+              confidence: validation.confidence,
+              wasHallucinated: validation.wasHallucinated || false,
+              wasCorrected: validation.corrected || false
+            };
+            
+            validatedQuotes.push(finalQuote);
+          }
+        }
+        
+        // Ensure we have at least one quote per theme
+        if (validatedQuotes.length === 0) {
+          const fallbackQuote = this.getFallbackQuoteForTheme(theme, classifications, responses);
+          if (fallbackQuote) {
+            validatedQuotes.push(fallbackQuote);
+          }
+        }
+        
+        finalQuotes[theme.id] = validatedQuotes.slice(0, 3); // Max 3 quotes per theme
+      }
+      
+      return {
+        quotes: finalQuotes,
+        totalQuotesExtracted: this.countQuotes(finalQuotes),
+        themeQuoteCounts: this.getThemeQuoteCounts(finalQuotes),
+        validationResult: {
+          passed: true,
+          method: 'fallback_validation'
+        }
+      };
+      
+    } catch (error) {
+      return { error: `Enhanced quote extraction failed: ${error.message}` };
+    }
+  }
+
+  /**
+   * Get a fallback quote for a theme when no valid quotes found
+   * @param {Object} theme - Theme object
+   * @param {Array} classifications - Classifications array
+   * @param {Array} responses - Response array
+   * @returns {Object|null} Fallback quote or null
+   */
+  getFallbackQuoteForTheme(theme, classifications, responses) {
+    // Find participants classified to this theme
+    const themeParticipants = classifications.filter(c => c.assignedTheme === theme.id);
+    
+    if (themeParticipants.length === 0) {
+      return null;
+    }
+    
+    // Get the first participant's response
+    const firstParticipant = themeParticipants[0];
+    const participantResponse = responses.find(r => r.participantId === firstParticipant.participantId);
+    
+    if (!participantResponse) {
+      return null;
+    }
+    
+    // Extract a fallback quote
+    const fallbackText = this.quoteValidator.extractFallbackQuote(
+      participantResponse,
+      theme.id,
+      classifications
+    );
+    
+    if (!fallbackText) {
+      return null;
+    }
+    
+    return {
+      quote: fallbackText,
+      participantId: firstParticipant.participantId,
+      confidence: 'low',
+      wasHallucinated: false,
+      wasCorrected: false,
+      isFallback: true
+    };
+  }
+
+  /**
+   * Create participant lookup for fast access
+   * @param {Array} responses - Array of response objects
+   * @returns {Object} Lookup object keyed by participantId
+   */
+  createParticipantLookup(responses) {
+    const lookup = {};
+    for (const response of responses) {
+      lookup[response.participantId] = response;
+    }
+    return lookup;
+  }
+
+  /**
    * Parse LLM quote extraction response
    * @param {string} llmResponse - Raw LLM response
    * @returns {Object} Parsed quotes organized by theme

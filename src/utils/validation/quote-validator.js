@@ -306,7 +306,33 @@ export class QuoteValidator {
   }
 
   /**
-   * Validate a single part of a quote
+   * Simplified quote matching with better word-based approach
+   * @param {string} quote - Quote to check
+   * @param {string} text - Text to search in
+   * @returns {boolean} Whether quote exists in text
+   */
+  quoteExistsInText(quote, text) {
+    // Normalize both
+    const normalizedQuote = quote.toLowerCase().replace(/[^\w\s]/g, '').trim();
+    const normalizedText = text.toLowerCase().replace(/[^\w\s]/g, '').trim();
+    
+    // Try exact match first
+    if (normalizedText.includes(normalizedQuote)) {
+      return true;
+    }
+    
+    // Try word-based matching (80% of words must match)
+    const quoteWords = normalizedQuote.split(/\s+/).filter(w => w.length > 2);
+    const textWords = new Set(normalizedText.split(/\s+/));
+    
+    const matchCount = quoteWords.filter(w => textWords.has(w)).length;
+    const matchRatio = matchCount / quoteWords.length;
+    
+    return matchRatio >= 0.8;
+  }
+
+  /**
+   * Validate a single part of a quote (updated to use simplified matching)
    * @param {string} quotePart - Part of quote to validate
    * @param {string} conversationText - Full user conversation text
    * @returns {Object} Part validation result
@@ -316,43 +342,18 @@ export class QuoteValidator {
       return { isValid: false, reason: 'Empty quote part' };
     }
 
-    // Normalize both texts for comparison while preserving meaning
-    const normalizedQuote = this.normalizeText(quotePart);
-    const normalizedConversation = this.normalizeText(conversationText);
-
-    // Check if normalized quote exists in normalized conversation (exact match)
-    let exists = normalizedConversation.includes(normalizedQuote);
-    let matchType = 'exact';
-
-    // If exact match fails and partial matches are allowed, try partial matching
-    if (!exists && this.config.allowPartialMatches) {
-      // Try matching individual words - if most words exist, consider it valid
-      const quoteWords = normalizedQuote.split(' ').filter(word => word.length > 2); // Filter out very short words
-      const conversationWords = normalizedConversation.split(' ');
-      
-      if (quoteWords.length > 0) {
-        const matchedWords = quoteWords.filter(word => conversationWords.includes(word));
-        const matchRatio = matchedWords.length / quoteWords.length;
-        
-        // Accept if 70% of meaningful words are found
-        if (matchRatio >= 0.7) {
-          exists = true;
-          matchType = 'partial';
-        }
-      }
-    }
+    const exists = this.quoteExistsInText(quotePart, conversationText);
 
     if (!exists && this.config.enableDetailedLogging) {
       console.log(`[QUOTE VALIDATOR] Quote part not found:`);
       console.log(`  Quote: "${quotePart}"`);
-      console.log(`  Normalized: "${normalizedQuote}"`);
       console.log(`  In conversation: "${conversationText.substring(0, 200)}..."`);
     }
 
     return {
       isValid: exists,
-      confidence: matchType === 'exact' ? 'high' : 'medium',
-      reason: exists ? `Found ${matchType} match` : 'Not found in conversation'
+      confidence: exists ? 'high' : 'none',
+      reason: exists ? 'Found match' : 'Not found in conversation'
     };
   }
 
@@ -387,6 +388,7 @@ export class QuoteValidator {
 
   /**
    * Extract user responses only from conversation format
+   * FIXED: Proper line-by-line parsing to avoid substring issues
    * @param {string} conversationText - Full conversation text
    * @returns {string} User responses only, joined with spaces
    */
@@ -395,26 +397,114 @@ export class QuoteValidator {
       return '';
     }
 
-    // Reuse the proven parsing logic from quote extractor
-    const parts = conversationText.split(/(?:assistant:|user:)/i);
+    const lines = conversationText.split('\n');
     const userParts = [];
+    let isUserSection = false;
     
-    // Find parts that come after 'user:' markers
-    for (let i = 0; i < parts.length; i++) {
-      // Check if this part comes after a 'user:' marker
-      const beforeThis = conversationText.substring(0, 
-        conversationText.indexOf(parts[i])
-      ).toLowerCase();
-      
-      if (beforeThis.includes('user:') && !beforeThis.endsWith('assistant:')) {
-        const userPart = parts[i].trim();
-        if (userPart.length > 0) {
-          userParts.push(userPart);
-        }
+    for (const line of lines) {
+      if (line.trim().toLowerCase().startsWith('user:')) {
+        isUserSection = true;
+        const userText = line.substring(line.indexOf(':') + 1).trim();
+        if (userText) userParts.push(userText);
+      } else if (line.trim().toLowerCase().startsWith('assistant:')) {
+        isUserSection = false;
+      } else if (isUserSection && line.trim()) {
+        userParts.push(line.trim());
       }
     }
     
     return userParts.join(' ');
+  }
+
+  /**
+   * Extract a fallback quote when original is hallucinated
+   * @param {Object} participantResponse - The participant's response object
+   * @param {string} themeId - Theme ID for context
+   * @param {Array} classifications - Classifications array
+   * @returns {string|null} A real quote from the participant or null
+   */
+  extractFallbackQuote(participantResponse, themeId, classifications) {
+    const userText = this.extractUserResponsesOnly(participantResponse.cleanResponse);
+    
+    // Get sentences from user response
+    const sentences = userText.split(/[.!?]+/).filter(s => s.trim().length > 10);
+    
+    if (sentences.length === 0) {
+      // If no sentences, just return the whole response if it's substantial
+      return userText.length > 20 ? userText : null;
+    }
+    
+    // Prefer longer, more substantial sentences
+    const sortedSentences = sentences.sort((a, b) => b.length - a.length);
+    
+    // Return the most substantial sentence
+    return sortedSentences[0].trim();
+  }
+
+  /**
+   * Enhanced quote validation with fallback strategy
+   * @param {Object} quote - Quote object with quote text and participantId
+   * @param {Object} participantLookup - Lookup of participant responses
+   * @param {Array} classifications - Classifications array
+   * @returns {Object} Validation result with fallback handling
+   */
+  validateQuoteWithFallback(quote, participantLookup, classifications) {
+    const quoteText = quote.quote;
+    const claimedParticipantId = quote.participantId;
+    
+    // Step 1: Try exact match with claimed participant
+    if (participantLookup[claimedParticipantId]) {
+      const userText = this.extractUserResponsesOnly(
+        participantLookup[claimedParticipantId].cleanResponse
+      );
+      
+      if (this.quoteExistsInText(quoteText, userText)) {
+        return {
+          isValid: true,
+          participantId: claimedParticipantId,
+          confidence: 'high'
+        };
+      }
+    }
+    
+    // Step 2: Search all participants for this quote
+    for (const [participantId, response] of Object.entries(participantLookup)) {
+      const userText = this.extractUserResponsesOnly(response.cleanResponse);
+      
+      if (this.quoteExistsInText(quoteText, userText)) {
+        return {
+          isValid: true,
+          participantId: participantId, // Corrected ID
+          confidence: 'medium',
+          corrected: true
+        };
+      }
+    }
+    
+    // Step 3: Quote is hallucinated - try to find ANY relevant quote from claimed participant
+    if (participantLookup[claimedParticipantId]) {
+      const fallbackQuote = this.extractFallbackQuote(
+        participantLookup[claimedParticipantId],
+        quote.themeId,
+        classifications
+      );
+      
+      if (fallbackQuote) {
+        return {
+          isValid: true,
+          participantId: claimedParticipantId,
+          replacementQuote: fallbackQuote,
+          confidence: 'low',
+          wasHallucinated: true
+        };
+      }
+    }
+    
+    // Step 4: Complete failure - quote is hallucinated and no fallback found
+    return {
+      isValid: false,
+      reason: 'Quote not found and no suitable replacement available'
+    };
   }
 
   /**

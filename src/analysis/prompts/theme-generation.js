@@ -9,18 +9,14 @@
  * Load theme generation prompt template
  * @param {string} promptType - Type of prompt to load
  * @param {Object} options - Additional prompt options
- * @returns {string} Formatted prompt template
+ * @returns {Object} Prompt template with system and user parts
  */
 export function loadPrompt(promptType, options = {}) {
-  // TODO: Implement prompt loading logic
-  // - Return appropriate prompt template based on promptType
-  // - Apply any customization options
-  
   if (promptType === 'theme-generation') {
-    return getThemeGenerationPrompt(options);
+    return { template: getThemeGenerationPrompt(options) };
   }
   
-  throw new Error(`Unknown prompt type: ${promptType}`);
+  return { error: `Unknown prompt type: ${promptType}` };
 }
 
 /**
@@ -79,14 +75,9 @@ function getThemeGenerationPrompt(options = {}) {
  * Format prompt template with actual data
  * @param {string} template - Prompt template string
  * @param {Object} data - Data to insert into template
- * @returns {string} Formatted prompt ready for LLM
+ * @returns {Object} Formatted prompts with system and user messages
  */
 export function formatPrompt(template, data) {
-  // TODO: Implement prompt formatting
-  // - Replace placeholders in template with actual data
-  // - Handle special formatting for arrays and objects
-  // - Ensure proper escaping and formatting
-  
   let formattedPrompt = template;
   
   // Replace placeholder variables
@@ -95,19 +86,27 @@ export function formatPrompt(template, data) {
     let replacement;
     
     if (Array.isArray(value)) {
-      replacement = value.map(item => 
-        typeof item === 'string' ? item : JSON.stringify(item, null, 2)
-      ).join('\n\n');
+      replacement = value.map((item, index) => 
+        `${index + 1}. ${typeof item === 'string' ? item : JSON.stringify(item, null, 2)}`
+      ).join('\n');
     } else if (typeof value === 'object') {
       replacement = JSON.stringify(value, null, 2);
     } else {
       replacement = String(value);
     }
     
-    formattedPrompt = formattedPrompt.replace(new RegExp(placeholder, 'g'), replacement);
+    formattedPrompt = formattedPrompt.replace(new RegExp(placeholder.replace(/[{}]/g, '\\$&'), 'g'), replacement);
   }
   
-  return formattedPrompt;
+  // Split into system and user prompts
+  const systemPrompt = `You are an expert qualitative researcher specializing in thematic analysis. You analyze participant responses to identify patterns and generate meaningful themes.`;
+  
+  const userPrompt = formattedPrompt;
+  
+  return {
+    systemPrompt,
+    userPrompt
+  };
 }
 
 /**

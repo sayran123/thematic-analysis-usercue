@@ -1,13 +1,17 @@
 /**
- * TODO: LangChain/LangSmith setup
+ * LangChain/LangSmith setup
  * 
  * This module configures LangChain and LangSmith integration for the thematic analysis pipeline.
  * Handles LLM initialization, API configuration, and monitoring setup.
  */
 
+import dotenv from 'dotenv';
 import { ChatOpenAI } from '@langchain/openai';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { LLM_CONFIG, LOGGING_CONFIG } from './constants.js';
+
+// Load environment variables from .env file
+dotenv.config();
 
 /**
  * Initialize LLM instance with configuration

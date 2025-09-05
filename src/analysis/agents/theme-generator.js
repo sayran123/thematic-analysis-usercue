@@ -1,5 +1,5 @@
 /**
- * TODO: LLM: Generate themes + derive questions
+ * LLM: Generate themes + derive questions
  * 
  * This agent has dual responsibility:
  * 1. Derive the actual research question from conversation patterns
@@ -8,62 +8,134 @@
  * Focuses only on user responses, ignoring assistant questions.
  */
 
-// TODO: Add necessary imports
-// import { loadPrompt, formatPrompt } from '../prompts/theme-generation.js';
-// import { llm } from '../../utils/config/llm-config.js';
+import { loadPrompt, formatPrompt } from '../prompts/theme-generation.js';
+import { initializeLLM, createMessages, invokeLLM, parseLLMResponse } from '../../utils/config/llm-config.js';
 
 /**
  * Theme Generator Agent class
  */
 export class ThemeGeneratorAgent {
   constructor() {
-    // TODO: Initialize LLM configuration
+    this.llm = null; // Initialize lazily
     this.prompt = null; // Will load from prompts/theme-generation.js
   }
 
   /**
    * Generate themes and derive research question from responses
    * @param {Object} input - Input data containing questionId, responses, projectBackground
-   * @returns {Promise<Object>} Result with derivedQuestion and themes
+   * @returns {Promise<Object>} Result with derivedQuestion and themes or error
    */
   async invoke(input) {
-    // TODO: Implement theme generation logic
-    // - Load theme generation prompt template
-    // - Format prompt with input data (questionId, responses, projectBackground)
-    // - Call LLM API to generate themes and derive question
-    // - Parse and validate response
-    // - Return structured result
-    
-    const { questionId, responses, projectBackground } = input;
-    
-    // Expected output format:
-    // {
-    //   derivedQuestion: "What features do you consider when choosing a VPN?",
-    //   themes: [
-    //     { 
-    //       id: "privacy-policies",
-    //       title: "Privacy and No-Logs Policies", 
-    //       description: "...", 
-    //       estimatedParticipants: 38 
-    //     }
-    //   ]
-    // }
-    
-    throw new Error('Not implemented yet');
+    try {
+      // Validate input
+      const validation = this.validateInput(input);
+      if (validation.error) {
+        return { error: validation.error };
+      }
+
+      // Initialize LLM if needed
+      if (!this.llm) {
+        const llmResult = await initializeLLM();
+        if (llmResult.error) {
+          return { error: `LLM initialization failed: ${llmResult.error}` };
+        }
+        this.llm = llmResult.llm;
+      }
+
+      // Load prompt template if needed
+      if (!this.prompt) {
+        const promptResult = loadPrompt('theme-generation');
+        if (promptResult.error) {
+          return { error: `Prompt loading failed: ${promptResult.error}` };
+        }
+        this.prompt = promptResult.template;
+      }
+
+      const { questionId, responses, projectBackground } = input;
+      
+      // Extract user responses only from conversation format
+      const userResponses = responses.map(r => this.extractUserResponse(r.cleanResponse)).filter(Boolean);
+      
+      if (userResponses.length === 0) {
+        return { error: 'No valid user responses found in conversations' };
+      }
+
+      // Format the prompt with input data
+      const formattedPrompt = formatPrompt(this.prompt, {
+        questionId,
+        responses: userResponses,
+        projectBackground,
+        responseCount: userResponses.length
+      });
+
+      // Create messages for LLM
+      const messages = createMessages(formattedPrompt.systemPrompt, formattedPrompt.userPrompt);
+
+      // Call LLM API
+      const llmResult = await invokeLLM(this.llm, messages);
+      if (llmResult.error) {
+        return { error: `LLM API call failed: ${llmResult.error}` };
+      }
+      
+      // Parse and validate the response
+      const parsedResult = this.parseLLMResponse(llmResult.content);
+      if (parsedResult.error) {
+        return parsedResult;
+      }
+
+      return parsedResult;
+
+    } catch (error) {
+      return { error: `Theme generation failed: ${error.message}` };
+    }
   }
 
   /**
    * Validate theme generation input
    * @param {Object} input - Input to validate
-   * @returns {boolean} True if input is valid
+   * @returns {Object} Validation result with error if invalid
    */
   validateInput(input) {
-    // TODO: Implement input validation
-    // - Check required fields exist
-    // - Validate responses array
-    // - Check questionId format
+    if (!input) {
+      return { error: 'Input is required' };
+    }
+
+    if (!input.questionId || typeof input.questionId !== 'string') {
+      return { error: 'Valid questionId is required' };
+    }
+
+    if (!input.responses || !Array.isArray(input.responses)) {
+      return { error: 'Responses array is required' };
+    }
+
+    if (input.responses.length === 0) {
+      return { error: 'At least one response is required' };
+    }
+
+    if (!input.projectBackground || typeof input.projectBackground !== 'string') {
+      return { error: 'Project background is required' };
+    }
+
+    return { valid: true };
+  }
+
+  /**
+   * Extract user response from conversation format
+   * @param {string} conversationText - Full conversation text
+   * @returns {string} User response only
+   */
+  extractUserResponse(conversationText) {
+    if (!conversationText) return '';
     
-    throw new Error('Not implemented yet');
+    // Split by user: markers and extract user parts
+    const parts = conversationText.split(/user:\s*/);
+    const userParts = parts.slice(1); // Skip first part (before first user:)
+    
+    // Join user responses and clean up
+    return userParts.map(part => {
+      // Remove any subsequent assistant: parts
+      return part.split(/assistant:\s*/)[0].trim();
+    }).filter(Boolean).join(' ');
   }
 
   /**
@@ -72,11 +144,59 @@ export class ThemeGeneratorAgent {
    * @returns {Object} Parsed theme generation result
    */
   parseLLMResponse(llmResponse) {
-    // TODO: Implement response parsing
-    // - Parse JSON or structured text response
-    // - Validate theme structure
-    // - Generate theme IDs if not provided
-    
-    throw new Error('Not implemented yet');
+    try {
+      // Try to parse as JSON first
+      let parsed;
+      if (typeof llmResponse === 'string') {
+        parsed = JSON.parse(llmResponse);
+      } else {
+        parsed = llmResponse;
+      }
+
+      // Validate required fields
+      if (!parsed.derivedQuestion || typeof parsed.derivedQuestion !== 'string') {
+        return { error: 'LLM response missing derivedQuestion' };
+      }
+
+      if (!parsed.themes || !Array.isArray(parsed.themes)) {
+        return { error: 'LLM response missing themes array' };
+      }
+
+      if (parsed.themes.length === 0) {
+        return { error: 'LLM response contains no themes' };
+      }
+
+      // Validate and enhance each theme
+      const processedThemes = parsed.themes.map((theme, index) => {
+        // Generate ID if not provided
+        if (!theme.id) {
+          theme.id = `theme_${index + 1}_${Date.now()}`;
+        }
+
+        // Validate required theme fields
+        if (!theme.title || typeof theme.title !== 'string') {
+          throw new Error(`Theme ${index + 1} missing title`);
+        }
+
+        if (!theme.description || typeof theme.description !== 'string') {
+          throw new Error(`Theme ${index + 1} missing description`);
+        }
+
+        return {
+          id: theme.id,
+          title: theme.title.trim(),
+          description: theme.description.trim(),
+          estimatedParticipants: theme.estimatedParticipants || 0
+        };
+      });
+
+      return {
+        derivedQuestion: parsed.derivedQuestion.trim(),
+        themes: processedThemes
+      };
+
+    } catch (error) {
+      return { error: `Failed to parse LLM response: ${error.message}` };
+    }
   }
 }

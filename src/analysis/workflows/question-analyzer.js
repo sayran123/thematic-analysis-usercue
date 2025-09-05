@@ -8,6 +8,8 @@
 import { StateGraph, END, START } from '@langchain/langgraph';
 import { Annotation } from '@langchain/langgraph';
 import { logOperation } from '../../utils/config/llm-config.js';
+import { ThemeGeneratorAgent } from '../agents/theme-generator.js';
+import { ThemeValidator } from '../../utils/validation/theme-validator.js';
 
 /**
  * Question Analysis State structure
@@ -18,6 +20,7 @@ import { logOperation } from '../../utils/config/llm-config.js';
  * @property {Object} stats - Question statistics
  * @property {Array|null} themes - Generated themes
  * @property {string|null} derivedQuestion - Derived research question
+ * @property {Object|null} themeValidation - Theme validation results
  * @property {Array|null} classifications - Response classifications
  * @property {Object|null} quotes - Extracted quotes by theme
  * @property {Object|null} summary - Generated summary
@@ -29,6 +32,8 @@ import { logOperation } from '../../utils/config/llm-config.js';
 export class QuestionAnalysisWorkflow {
   constructor() {
     this.graph = null;
+    this.themeGeneratorAgent = null; // Initialize on first use
+    this.themeValidator = null; // Initialize on first use
     this.initializeGraph();
   }
 
@@ -45,6 +50,7 @@ export class QuestionAnalysisWorkflow {
         stats: Annotation(),
         themes: Annotation(),
         derivedQuestion: Annotation(),
+        themeValidation: Annotation(),
         classifications: Annotation(),
         quotes: Annotation(),
         summary: Annotation()
@@ -55,13 +61,15 @@ export class QuestionAnalysisWorkflow {
 
       // Add nodes for each workflow stage
       this.graph.addNode("generateThemes", this.generateThemes.bind(this));
+      this.graph.addNode("validateThemes", this.validateThemes.bind(this));
       this.graph.addNode("classifyResponses", this.classifyResponses.bind(this));
       this.graph.addNode("extractQuotes", this.extractQuotes.bind(this));
       this.graph.addNode("generateSummary", this.generateSummary.bind(this));
 
       // Define the workflow edges (state transitions)
       this.graph.addEdge(START, "generateThemes");
-      this.graph.addEdge("generateThemes", "classifyResponses");
+      this.graph.addEdge("generateThemes", "validateThemes");
+      this.graph.addEdge("validateThemes", "classifyResponses");
       this.graph.addEdge("classifyResponses", "extractQuotes");
       this.graph.addEdge("extractQuotes", "generateSummary");
       this.graph.addEdge("generateSummary", END);
@@ -70,7 +78,7 @@ export class QuestionAnalysisWorkflow {
       this.compiledGraph = this.graph.compile();
       
       logOperation('workflow-initialized', { 
-        nodes: ['generateThemes', 'classifyResponses', 'extractQuotes', 'generateSummary'],
+        nodes: ['generateThemes', 'validateThemes', 'classifyResponses', 'extractQuotes', 'generateSummary'],
         status: 'ready'
       });
       
@@ -102,6 +110,8 @@ export class QuestionAnalysisWorkflow {
       logOperation('workflow-completed', { 
         questionId: finalState.question?.questionId,
         hasThemes: !!finalState.themes,
+        hasThemeValidation: !!finalState.themeValidation,
+        themeValidationPassed: finalState.themeValidation?.passed,
         hasClassifications: !!finalState.classifications,
         hasQuotes: !!finalState.quotes,
         hasSummary: !!finalState.summary
@@ -122,35 +132,123 @@ export class QuestionAnalysisWorkflow {
    * @returns {Promise<QuestionAnalysisState>} Updated state with themes and derivedQuestion
    */
   async generateThemes(state) {
-    logOperation('node-generateThemes', { questionId: state.question.questionId });
+    logOperation('node-generateThemes-start', { 
+      questionId: state.question.questionId,
+      responseCount: state.responses.length 
+    });
     
-    // MVP placeholder: Create mock themes for testing
-    const themes = [
-      {
-        id: 'theme1',
-        title: 'Mock Theme 1',
-        description: 'Placeholder theme for testing workflow',
-        estimatedParticipants: 20
-      },
-      {
-        id: 'theme2', 
-        title: 'Mock Theme 2',
-        description: 'Another placeholder theme for testing',
-        estimatedParticipants: 15
+    try {
+      // Initialize theme generator agent
+      if (!this.themeGeneratorAgent) {
+        this.themeGeneratorAgent = new ThemeGeneratorAgent();
+        logOperation('node-generateThemes-agent-initialized', {});
       }
-    ];
 
-    const derivedQuestion = `What are the main factors in ${state.question.questionId}?`;
+      // Invoke agent with state data
+      const result = await this.themeGeneratorAgent.invoke({
+        questionId: state.question.questionId,
+        responses: state.responses,
+        projectBackground: state.projectBackground
+      });
 
-    return {
-      ...state,
-      themes,
-      derivedQuestion
-    };
+      // Handle errors from agent
+      if (result.error) {
+        logOperation('node-generateThemes-error', { error: result.error });
+        return { 
+          ...state, 
+          error: `Theme generation failed: ${result.error}` 
+        };
+      }
+
+      // Validate result structure
+      if (!result.themes || !result.derivedQuestion) {
+        const errorMsg = 'Invalid theme generation result: missing themes or derivedQuestion';
+        logOperation('node-generateThemes-invalid-result', { error: errorMsg });
+        return { 
+          ...state, 
+          error: errorMsg 
+        };
+      }
+
+      logOperation('node-generateThemes-success', { 
+        themeCount: result.themes.length,
+        derivedQuestion: result.derivedQuestion,
+        themes: result.themes.map(t => ({ id: t.id, title: t.title }))
+      });
+
+      return {
+        ...state,
+        themes: result.themes,
+        derivedQuestion: result.derivedQuestion
+      };
+
+    } catch (error) {
+      const errorMsg = `Unexpected error in theme generation: ${error.message}`;
+      logOperation('node-generateThemes-unexpected-error', { error: errorMsg, stack: error.stack });
+      return { 
+        ...state, 
+        error: errorMsg 
+      };
+    }
   }
 
   /**
-   * Classify responses to themes (Node 2)
+   * Validate themes using objective rule-based validation (Node 2)
+   * @param {QuestionAnalysisState} state - Current state
+   * @returns {Promise<QuestionAnalysisState>} Updated state with validation results
+   */
+  async validateThemes(state) {
+    logOperation('node-validateThemes-start', { 
+      questionId: state.question.questionId,
+      themeCount: state.themes?.length 
+    });
+    
+    try {
+      // Initialize theme validator
+      if (!this.themeValidator) {
+        this.themeValidator = new ThemeValidator();
+        logOperation('node-validateThemes-validator-initialized', {});
+      }
+
+      // Validate themes (no classifications available yet at this stage)
+      const validationResult = this.themeValidator.validateThemes(
+        state.themes,
+        null, // No classifications yet
+        state.responses,
+        state.derivedQuestion
+      );
+
+      logOperation('node-validateThemes-complete', { 
+        passed: validationResult.passed,
+        errorCount: validationResult.errors.length,
+        warningCount: validationResult.warnings.length,
+        errors: validationResult.errors,
+        warnings: validationResult.warnings
+      });
+
+      return {
+        ...state,
+        themeValidation: validationResult
+      };
+
+    } catch (error) {
+      const errorMsg = `Unexpected error in theme validation: ${error.message}`;
+      logOperation('node-validateThemes-error', { error: errorMsg, stack: error.stack });
+      
+      // Continue pipeline with validation error recorded
+      return { 
+        ...state, 
+        themeValidation: {
+          passed: false,
+          errors: [errorMsg],
+          warnings: []
+        }
+      };
+    }
+  }
+
+  /**
+   * Classify responses to themes (Node 3)
    * @param {QuestionAnalysisState} state - Current state
    * @returns {Promise<QuestionAnalysisState>} Updated state with classifications
    */
@@ -176,7 +274,7 @@ export class QuestionAnalysisWorkflow {
   }
 
   /**
-   * Extract supporting quotes with validation (Node 3)
+   * Extract supporting quotes with validation (Node 4)
    * @param {QuestionAnalysisState} state - Current state
    * @returns {Promise<QuestionAnalysisState>} Updated state with validated quotes
    */
@@ -203,7 +301,7 @@ export class QuestionAnalysisWorkflow {
   }
 
   /**
-   * Generate summary and headline (Node 4)
+   * Generate summary and headline (Node 5)
    * @param {QuestionAnalysisState} state - Current state
    * @returns {Promise<QuestionAnalysisState>} Updated state with summary
    */

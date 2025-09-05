@@ -8,3 +8,6 @@ General concepts:
 - I want to implement a phase, test it using the file and make sure the output is what I am expecting
 - For llm responses I want to implement one agent run the system, validate the output and then move on to the next step/next agent in the process 
 - I don’t want to run all 6 questions concurrently. I want to run one question validate that I can get it to work then once that’s complete then ill implement the parallelization code. 
+- It is cruicial that we control the MVP development for accuracy over cost and speed savings. I want to get the best results initially and then we can optimize from there
+
+Note: In this code generation session you will not be integrating with Linear in any capacity.

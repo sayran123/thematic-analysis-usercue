@@ -115,10 +115,12 @@ export class SummarizerAgent {
       }
     }
 
-    // Validate classification structure
-    for (const classification of classifications) {
-      if (!classification.participantId || !classification.theme) {
-        return { error: 'Each classification must have participantId and theme' };
+    // Validate classification structure (if classifications are provided)
+    if (classifications && classifications.length > 0) {
+      for (const classification of classifications) {
+        if (!classification.participantId || !classification.theme) {
+          return { error: 'Each classification must have participantId and theme' };
+        }
       }
     }
 

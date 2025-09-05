@@ -162,6 +162,16 @@ export function formatPrompt(template, data) {
  */
 function calculateThemeStatistics(themes, classifications) {
   const themeStats = {};
+  
+  // Guard against undefined or empty classifications
+  if (!classifications || !Array.isArray(classifications) || classifications.length === 0) {
+    // Return empty stats for all themes
+    themes.forEach(theme => {
+      themeStats[theme.id] = { count: 0, percentage: 0 };
+    });
+    return themeStats;
+  }
+  
   const totalClassifications = classifications.length;
   
   themes.forEach(theme => {

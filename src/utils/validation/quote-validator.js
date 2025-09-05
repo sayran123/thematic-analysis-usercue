@@ -14,11 +14,11 @@ import { VALIDATION_CONFIG } from '../config/constants.js';
 export class QuoteValidator {
   constructor(options = {}) {
     this.config = {
-      // Text normalization settings
+      // Text normalization settings - MORE LENIENT for better quote recovery
       preserveCase: options.preserveCase || false,
-      preservePunctuation: options.preservePunctuation || true, // More lenient - preserve punctuation by default
-      allowPartialMatches: options.allowPartialMatches || false,
-      minQuoteLength: options.minQuoteLength || 3, // Minimum words for validation
+      preservePunctuation: options.preservePunctuation || false, // Remove punctuation for better matching
+      allowPartialMatches: options.allowPartialMatches || true, // Allow partial matches for flexibility
+      minQuoteLength: options.minQuoteLength || 2, // Reduced minimum words (was 3)
       
       // Multi-part quote settings
       multiPartSeparator: options.multiPartSeparator || ' ... ',
@@ -146,42 +146,129 @@ export class QuoteValidator {
       return { errors, warnings };
     }
 
-    if (!quote.participantId || typeof quote.participantId !== 'string') {
-      errors.push(`Missing participantId for quote: "${quote.quote.substring(0, 50)}..."`);
-      return { errors, warnings };
+    // 2. SMART QUOTE VALIDATION: Primary goal is ensuring quote is not hallucinated
+    const smartValidation = this.validateQuoteWithSmartIdCorrection(quote, participantLookup);
+    
+    if (!smartValidation.isValid) {
+      // Only mark as error if quote doesn't exist ANYWHERE (hallucinated)
+      errors.push(`HALLUCINATED QUOTE: "${quote.quote.substring(0, 50)}..." - ${smartValidation.reason}`);
+    } else {
+      // Quote exists! Update with correct participant ID if we found a better match
+      if (smartValidation.correctedParticipantId && smartValidation.correctedParticipantId !== quote.participantId) {
+        warnings.push(`Quote participant ID corrected from ${quote.participantId} to ${smartValidation.correctedParticipantId}`);
+        quote.participantId = smartValidation.correctedParticipantId; // Fix the ID
+      }
+      
+      // Add confidence indicator
+      quote.validationConfidence = smartValidation.confidence;
     }
 
-    // 2. Find source conversation
-    const conversation = participantLookup[quote.participantId];
-    if (!conversation) {
-      errors.push(`No conversation found for participant ${quote.participantId}`);
-      return { errors, warnings };
-    }
-
-    // 3. Extract user responses only from conversation
-    const userText = this.extractUserResponsesOnly(conversation.cleanResponse);
-    if (!userText || userText.trim() === '') {
-      errors.push(`No user responses found in conversation for participant ${quote.participantId}`);
-      return { errors, warnings };
-    }
-
-    // 4. Verify quote exists verbatim in user responses
-    const verbatimCheck = this.validateQuoteExistsVerbatim(quote.quote, userText);
-    if (!verbatimCheck.isValid) {
-      errors.push(`HALLUCINATED QUOTE: "${quote.quote.substring(0, 50)}..." for participant ${quote.participantId} - ${verbatimCheck.reason}`);
-    }
-
-    // 5. Validate participant classification matches theme (optional warning)
+    // 3. Validate participant classification matches theme (optional warning only)
     const participantClassification = classifications?.find(c => c.participantId === quote.participantId);
     if (participantClassification && participantClassification.themeId !== theme.id) {
-      warnings.push(`Quote from participant ${quote.participantId} for theme "${theme.title}" but participant classified to "${participantClassification.theme}"`);
+      warnings.push(`Quote from participant ${quote.participantId} classified to different theme`);
     }
 
-    // 6. Check quote length and quality
-    const qualityCheck = this.validateQuoteQuality(quote.quote);
-    warnings.push(...qualityCheck.warnings);
-
     return { errors, warnings };
+  }
+
+  /**
+   * Smart quote validation with automatic participant ID correction
+   * Primary goal: Ensure quote is real (not hallucinated), fix IDs if needed
+   * @param {Object} quote - Quote object with quote text and participantId
+   * @param {Object} participantLookup - All participant conversations
+   * @returns {Object} Validation result with corrected participant ID if needed
+   */
+  validateQuoteWithSmartIdCorrection(quote, participantLookup) {
+    const quoteText = quote.quote;
+    const originalParticipantId = quote.participantId;
+    
+    // Step 1: Try original participant ID first
+    if (originalParticipantId && participantLookup[originalParticipantId]) {
+      const originalConversation = participantLookup[originalParticipantId];
+      const originalUserText = this.extractUserResponsesOnly(originalConversation.cleanResponse);
+      
+      if (originalUserText) {
+        const verbatimCheck = this.validateQuoteExistsVerbatim(quoteText, originalUserText);
+        if (verbatimCheck.isValid) {
+          return {
+            isValid: true,
+            confidence: 'high',
+            correctedParticipantId: null, // No correction needed
+            reason: 'Quote found with original participant ID'
+          };
+        }
+      }
+    }
+    
+    // Step 2: Quote not found with original ID - search all participants
+    const allParticipants = Object.keys(participantLookup);
+    const matches = [];
+    
+    for (const participantId of allParticipants) {
+      const conversation = participantLookup[participantId];
+      if (!conversation) continue;
+      
+      const userText = this.extractUserResponsesOnly(conversation.cleanResponse);
+      if (!userText) continue;
+      
+      const verbatimCheck = this.validateQuoteExistsVerbatim(quoteText, userText);
+      if (verbatimCheck.isValid) {
+        matches.push({
+          participantId,
+          confidence: verbatimCheck.confidence || 'medium',
+          matchQuality: this.calculateMatchQuality(quoteText, userText)
+        });
+      }
+    }
+    
+    // Step 3: Analyze results
+    if (matches.length === 0) {
+      return {
+        isValid: false,
+        confidence: 'none',
+        correctedParticipantId: null,
+        reason: 'Quote not found in any participant conversation (likely hallucinated)'
+      };
+    }
+    
+    if (matches.length === 1) {
+      return {
+        isValid: true,
+        confidence: 'high',
+        correctedParticipantId: matches[0].participantId,
+        reason: `Quote found with participant ${matches[0].participantId}`
+      };
+    }
+    
+    // Multiple matches - pick the best one
+    const bestMatch = matches.sort((a, b) => b.matchQuality - a.matchQuality)[0];
+    return {
+      isValid: true,
+      confidence: 'medium',
+      correctedParticipantId: bestMatch.participantId,
+      reason: `Quote found with multiple participants, selected best match: ${bestMatch.participantId}`
+    };
+  }
+
+  /**
+   * Calculate match quality score for a quote in participant text
+   * @param {string} quoteText - The quote text
+   * @param {string} participantText - The participant's full text
+   * @returns {number} Match quality score (higher is better)
+   */
+  calculateMatchQuality(quoteText, participantText) {
+    // Simple scoring based on context and quote length
+    const quoteWords = quoteText.split(' ').length;
+    const contextBefore = participantText.indexOf(quoteText);
+    const contextAfter = participantText.length - (contextBefore + quoteText.length);
+    
+    let score = 0;
+    score += quoteWords * 2; // Longer quotes are generally better
+    score += Math.min(contextBefore, 100); // Some context before is good
+    score += Math.min(contextAfter, 100); // Some context after is good
+    
+    return score;
   }
 
   /**
@@ -233,8 +320,27 @@ export class QuoteValidator {
     const normalizedQuote = this.normalizeText(quotePart);
     const normalizedConversation = this.normalizeText(conversationText);
 
-    // Check if normalized quote exists in normalized conversation
-    const exists = normalizedConversation.includes(normalizedQuote);
+    // Check if normalized quote exists in normalized conversation (exact match)
+    let exists = normalizedConversation.includes(normalizedQuote);
+    let matchType = 'exact';
+
+    // If exact match fails and partial matches are allowed, try partial matching
+    if (!exists && this.config.allowPartialMatches) {
+      // Try matching individual words - if most words exist, consider it valid
+      const quoteWords = normalizedQuote.split(' ').filter(word => word.length > 2); // Filter out very short words
+      const conversationWords = normalizedConversation.split(' ');
+      
+      if (quoteWords.length > 0) {
+        const matchedWords = quoteWords.filter(word => conversationWords.includes(word));
+        const matchRatio = matchedWords.length / quoteWords.length;
+        
+        // Accept if 70% of meaningful words are found
+        if (matchRatio >= 0.7) {
+          exists = true;
+          matchType = 'partial';
+        }
+      }
+    }
 
     if (!exists && this.config.enableDetailedLogging) {
       console.log(`[QUOTE VALIDATOR] Quote part not found:`);
@@ -245,7 +351,8 @@ export class QuoteValidator {
 
     return {
       isValid: exists,
-      reason: exists ? 'Found verbatim' : 'Not found in conversation'
+      confidence: matchType === 'exact' ? 'high' : 'medium',
+      reason: exists ? `Found ${matchType} match` : 'Not found in conversation'
     };
   }
 

@@ -1,0 +1,360 @@
+---
+alwaysApply: false
+---
+# Milestone Generation Prompt
+
+## Goal
+Transform a Product Requirements Document (PRD) into small, focused milestones that each represent 1-3 PRs (100-300 lines of code each) that can merge directly to main. Create these as Linear issues due to MCP limitations.
+
+## Required Context
+- README configuration file with user ID and project settings
+- Complete PRD document
+- Technical architecture/design doc (if separate from PRD)
+- Current codebase structure understanding
+
+## Process
+
+### Step 1: Analyze PRD Scope
+Read the entire PRD and identify:
+- Major feature areas
+- Technical dependencies
+- Logical boundaries for incremental delivery
+- Risk areas that need early validation
+
+### Step 2: Apply Milestone Design Principles
+
+Each milestone MUST:
+- Represent 1-3 small PRs (50-300 lines each)
+- Be independently deployable to main
+- Add value without breaking existing functionality
+- Follow additive-only patterns (new files/fields preferred)
+- Complete in 1-3 days of development
+
+Milestone boundaries should align with:
+- Single domain concept (e.g., "Location Entity")
+- Single technical layer (e.g., "Schema Updates")
+- Single integration point (e.g., "Add Guard")
+- Clear completion criteria
+
+### Step 3: Generate Milestone Structure
+
+For each milestone, provide:
+
+**For next 2-3 milestones (immediate focus):**
+```markdown
+Milestone X.Y: [Clear, Specific Name]
+Purpose: [One sentence description]
+PRs: [Expected number and size with confidence]
+Dependencies: [Which milestones must complete first]
+Risk: [Low/Medium/High - complexity or unknowns]
+Files: [Key files/areas to be modified]
+```
+
+**For future milestones (rough planning):**
+```markdown
+Milestone X.Y: [Clear, Specific Name]
+Purpose: [One sentence description]
+PRs: [Rough estimate - will refine when closer]
+Dependencies: [Which milestones must complete first]
+Note: Details to be refined when approaching this phase
+```
+
+### Step 4: Validate Against Criteria
+
+Check each milestone:
+- [ ] Can this merge to main without breaking anything?
+- [ ] Is this genuinely 1-3 small PRs?
+- [ ] Does this add value independently?
+- [ ] Are dependencies clearly identified?
+
+## Output Format
+
+```markdown
+# Milestones for [Project Name]
+
+## Phase 1: [Phase Name] (Weeks X-Y)
+
+### Milestone 1.1: [Specific Component/Feature]
+**Purpose:** [One sentence describing the value]
+**PRs:** 1 PR, ~100 lines (new files only)
+**Dependencies:** None
+**Risk:** Low
+
+### Milestone 1.2: [Specific Component/Feature]
+**Purpose:** [One sentence describing the value]
+**PRs:** 2 PRs, ~150 lines each
+**Dependencies:** Milestone 1.1
+**Risk:** Medium (modifies existing schema)
+
+## Phase 2: [Phase Name] (Weeks X-Y)
+
+### Milestone 2.1: [Specific Component/Feature]
+[Continue pattern...]
+
+## Full Milestone Timeline
+
+[Table showing all milestones with target weeks - helps stakeholders see full scope]
+```
+
+## Example Transformation
+
+**Bad Milestone (too big):**
+"Location Domain Foundation" - 500+ lines, 5+ PRs, multiple concepts
+
+**Good Milestones (properly sized):**
+- Milestone 1.1: "Nonprofit Location Fields" - 1 PR, 80 lines
+- Milestone 1.2: "Location Entity Core" - 1 PR, 150 lines  
+- Milestone 1.3: "Create Location Command" - 1 PR, 120 lines
+
+## Anti-Patterns to Avoid
+
+1. **Kitchen Sink Milestones**: Combining unrelated changes
+2. **Dependency Chains**: Milestone 5 needs 1,2,3,4 to work
+3. **Breaking Changes**: Modifying existing APIs/behavior
+4. **Vague Boundaries**: "Implement some commands"
+5. **Hidden Complexity**: "Simple" milestone that touches 20 files
+
+## Success Criteria
+
+Generated milestones should:
+- Give clear project roadmap
+- Enable daily PRs to main
+- Minimize merge conflicts
+- Allow flexible execution order (where possible)
+- Support incremental value delivery
+
+## IMPORTANT: Approval Gate
+
+**DO NOT push milestones to Linear until explicit approval**
+
+After generating milestones:
+1. Present the complete milestone plan
+2. Ask: "Please review these milestones. Should I proceed with pushing them to Linear?"
+3. Wait for explicit approval (e.g., "yes", "approved", "proceed")
+4. Only create Linear milestone issues after confirmation 
+
+If changes requested:
+- Update the milestone plan
+- Present revised version
+- Wait for approval again
+
+## Document Updates
+
+After approval and Linear creation:
+1. Create/update a task list document with:
+   - All milestone issues and their Linear IDs/URLs
+   - Current status (Not Started/In Progress/Complete)
+   - PR tracking section for each milestone
+2. Save this document for future context
+3. Confirm: "Task list document created with Linear IDs. Ready to proceed with task breakdown?"
+
+## Linear Issue Creation Details
+
+When creating Linear issues (as milestones):
+- **Assignee:** Use user ID from README
+- **Status:** "Not Started" (NOT "Triage")
+- **Project:** Use project from README
+- **Title Format:** "Milestone X.Y: [Name]"
+- **Description:** Include purpose, PR count, dependencies, and risk level
+
+## Output for Next Step
+
+Provide:
+- Task list document with all milestones
+- Recommendation for which milestone to tackle first
+- Any dependencies that affect execution order
+
+## When to Revisit Milestones
+
+As you progress through the project:
+1. When approaching a new phase (e.g., completing Phase 1)
+2. When learnings from completed work affect future estimates
+3. When external factors change scope
+
+Return to this prompt with:
+- "I'm approaching Phase 2, please provide detailed estimates for Milestones 2.1-2.3"
+- "Based on Phase 1 learnings, let's refine Phase 2 milestones"
+
+The AI will then:
+- Pull current milestone status from Linear
+- Apply learnings from completed work
+- Provide refined details for upcoming milestones
+- Update Linear milestones with better estimates# Milestone Generation Prompt
+
+## Goal
+Transform a Product Requirements Document (PRD) into small, focused milestones that each represent 1-3 PRs (100-300 lines of code each) that can merge directly to main. Create these as Linear issues due to MCP limitations.
+
+## Required Context
+- README configuration file with user ID and project settings
+- Complete PRD document
+- Technical architecture/design doc (if separate from PRD)
+- Current codebase structure understanding
+
+## Process
+
+### Step 1: Analyze PRD Scope
+Read the entire PRD and identify:
+- Major feature areas
+- Technical dependencies
+- Logical boundaries for incremental delivery
+- Risk areas that need early validation
+
+### Step 2: Apply Milestone Design Principles
+
+Each milestone MUST:
+- Represent 1-3 small PRs (50-300 lines each)
+- Be independently deployable to main
+- Add value without breaking existing functionality
+- Follow additive-only patterns (new files/fields preferred)
+- Complete in 1-3 days of development
+
+Milestone boundaries should align with:
+- Single domain concept (e.g., "Location Entity")
+- Single technical layer (e.g., "Schema Updates")
+- Single integration point (e.g., "Add Guard")
+- Clear completion criteria
+
+### Step 3: Generate Milestone Structure
+
+For each milestone, provide:
+
+**For next 2-3 milestones (immediate focus):**
+```markdown
+Milestone X.Y: [Clear, Specific Name]
+Purpose: [One sentence description]
+PRs: [Expected number and size with confidence]
+Dependencies: [Which milestones must complete first]
+Risk: [Low/Medium/High - complexity or unknowns]
+Files: [Key files/areas to be modified]
+```
+
+**For future milestones (rough planning):**
+```markdown
+Milestone X.Y: [Clear, Specific Name]
+Purpose: [One sentence description]
+PRs: [Rough estimate - will refine when closer]
+Dependencies: [Which milestones must complete first]
+Note: Details to be refined when approaching this phase
+```
+
+### Step 4: Validate Against Criteria
+
+Check each milestone:
+- [ ] Can this merge to main without breaking anything?
+- [ ] Is this genuinely 1-3 small PRs?
+- [ ] Does this add value independently?
+- [ ] Are dependencies clearly identified?
+
+## Output Format
+
+```markdown
+# Milestones for [Project Name]
+
+## Phase 1: [Phase Name] (Weeks X-Y)
+
+### Milestone 1.1: [Specific Component/Feature]
+**Purpose:** [One sentence describing the value]
+**PRs:** 1 PR, ~100 lines (new files only)
+**Dependencies:** None
+**Risk:** Low
+
+### Milestone 1.2: [Specific Component/Feature]
+**Purpose:** [One sentence describing the value]
+**PRs:** 2 PRs, ~150 lines each
+**Dependencies:** Milestone 1.1
+**Risk:** Medium (modifies existing schema)
+
+## Phase 2: [Phase Name] (Weeks X-Y)
+
+### Milestone 2.1: [Specific Component/Feature]
+[Continue pattern...]
+
+## Full Milestone Timeline
+
+[Table showing all milestones with target weeks - helps stakeholders see full scope]
+```
+
+## Example Transformation
+
+**Bad Milestone (too big):**
+"Location Domain Foundation" - 500+ lines, 5+ PRs, multiple concepts
+
+**Good Milestones (properly sized):**
+- Milestone 1.1: "Nonprofit Location Fields" - 1 PR, 80 lines
+- Milestone 1.2: "Location Entity Core" - 1 PR, 150 lines  
+- Milestone 1.3: "Create Location Command" - 1 PR, 120 lines
+
+## Anti-Patterns to Avoid
+
+1. **Kitchen Sink Milestones**: Combining unrelated changes
+2. **Dependency Chains**: Milestone 5 needs 1,2,3,4 to work
+3. **Breaking Changes**: Modifying existing APIs/behavior
+4. **Vague Boundaries**: "Implement some commands"
+5. **Hidden Complexity**: "Simple" milestone that touches 20 files
+
+## Success Criteria
+
+Generated milestones should:
+- Give clear project roadmap
+- Enable daily PRs to main
+- Minimize merge conflicts
+- Allow flexible execution order (where possible)
+- Support incremental value delivery
+
+## IMPORTANT: Approval Gate
+
+**DO NOT push milestones to Linear until explicit approval**
+
+After generating milestones:
+1. Present the complete milestone plan
+2. Ask: "Please review these milestones. Should I proceed with pushing them to Linear?"
+3. Wait for explicit approval (e.g., "yes", "approved", "proceed")
+4. Only create Linear milestone issues after confirmation 
+
+If changes requested:
+- Update the milestone plan
+- Present revised version
+- Wait for approval again
+
+## Document Updates
+
+After approval and Linear creation:
+1. Create/update a task list document with:
+   - All milestone issues and their Linear IDs/URLs
+   - Current status (Not Started/In Progress/Complete)
+   - PR tracking section for each milestone
+2. Save this document for future context
+3. Confirm: "Task list document created with Linear IDs. Ready to proceed with task breakdown?"
+
+## Linear Issue Creation Details
+
+When creating Linear issues (as milestones):
+- **Assignee:** Use user ID from README
+- **Status:** "Not Started" (NOT "Triage")
+- **Project:** Use project from README
+- **Title Format:** "Milestone X.Y: [Name]"
+- **Description:** Include purpose, PR count, dependencies, and risk level
+
+## Output for Next Step
+
+Provide:
+- Task list document with all milestones
+- Recommendation for which milestone to tackle first
+- Any dependencies that affect execution order
+
+## When to Revisit Milestones
+
+As you progress through the project:
+1. When approaching a new phase (e.g., completing Phase 1)
+2. When learnings from completed work affect future estimates
+3. When external factors change scope
+
+Return to this prompt with:
+- "I'm approaching Phase 2, please provide detailed estimates for Milestones 2.1-2.3"
+- "Based on Phase 1 learnings, let's refine Phase 2 milestones"
+
+The AI will then:
+- Pull current milestone status from Linear
+- Apply learnings from completed work
+- Provide refined details for upcoming milestones
+- Update Linear milestones with better estimates

@@ -1,0 +1,607 @@
+---
+alwaysApply: false
+---
+# Implementation Prompt
+
+## Goal
+
+Implement ALL sub-issues for a milestone together, producing focused, high-quality code that matches existing patterns and passes all tests.
+
+## Required Context from Previous Steps
+
+- README configuration file with user ID and project settings
+- Linear milestone issue with all sub-issues
+- Task list document (showing progress across all milestones)
+- Codebase access (for patterns and integration)
+- PRD section (if additional clarification needed)
+- Any completed PRs from previous milestones
+
+## Pre-Implementation Checklist
+
+Before starting any implementation:
+
+1. Verify previous milestone PR is merged (if dependencies exist)
+2. Update from main:
+   ```bash
+   git checkout main
+   git pull origin main
+   ```
+3. Create/checkout feature branch:
+   ```bash
+   git checkout -b feature/milestone-x-y-[descriptive-name]
+   # If branch exists: git checkout [branch-name] && git rebase main
+   ```
+4. Install dependencies:
+   ```bash
+   yarn
+   ```
+
+## Linear Status Management
+
+### When Starting Implementation
+
+1. Update Linear statuses:
+   - Set milestone issue to "In Progress"
+   - Set ALL sub-issues to "In Progress" (batch update)
+2. Confirm: "Updated all Linear statuses to In Progress. Ready to implement?"
+
+### During Implementation
+
+- Implement ALL sub-issues together (they're interdependent)
+- Do NOT test individual sub-issues (they need each other to work)
+- Keep all code changes related to the milestone
+
+### After Implementation Complete
+
+1. Run full build: `npm run build`
+2. Run all tests: `npm test`
+3. Fix any lint issues: `npm run lint:fix`
+4. Show summary of all changes
+
+### After PR Push
+
+- Update ALL sub-issues to "In Review" (batch update)
+- Update task list document with PR link
+
+### After PR Merge
+
+- Update ALL sub-issues to "Done"
+- Update milestone issue to "Done"
+
+## Input Required
+
+1. Milestone issue ID/URL from Linear
+2. Current task list state
+3. Related code files for patterns
+4. Dependencies that must be in place
+
+## Process
+
+### Step 1: Pre-Implementation Checklist
+
+Verify:
+
+- [ ] All dependencies are merged to main
+- [ ] Required patterns are accessible
+- [ ] File paths are confirmed
+- [ ] No conflicting work in progress
+
+### Step 2: Implementation Order
+
+Always follow this sequence:
+
+1. Create interfaces/types first
+2. Implement main functionality
+3. Add unit tests
+4. Verify all tests pass
+5. Self-review for patterns
+
+### Step 3: Implementation Guidelines
+
+## Output Format
+
+```markdown
+I'll implement all sub-issues for [Milestone Title].
+
+## Linear Status Update
+
+- Milestone issue [ID] → In Progress
+- All sub-issues → In Progress
+  [Show confirmation of status updates]
+
+## Implementation Plan
+
+1. [Sub-issue 1]: Create [specific functionality]
+2. [Sub-issue 2]: Add [specific functionality]
+3. [Sub-issue 3]: Implement [specific functionality]
+
+## Starting Implementation
+
+### Creating [file1.ts]
+
+[Show code being created]
+
+### Creating [file2.ts]
+
+[Show code being created]
+
+### Creating tests
+
+[Show test code]
+
+## Build & Test Results
+
+- Build: [PASS/FAIL]
+- Tests: [X passing]
+- Lint: [X issues fixed]
+
+## PR Ready Checklist
+
+- [ ] All sub-issues implemented
+- [ ] Code follows existing patterns
+- [ ] All tests pass
+- [ ] No lint errors
+- [ ] Branch pushed
+```
+
+## Implementation Rules
+
+### MUST:
+
+1. Implement EXACTLY what's specified
+2. Follow provided patterns precisely
+3. Include all required tests
+4. Use same naming conventions
+5. Match existing code style
+
+### MUST NOT:
+
+1. Add extra features
+2. Refactor existing code
+3. Change specified interfaces
+4. Make different architectural choices
+5. Include TODO comments
+
+## Common Patterns to Follow
+
+### Entity Pattern
+
+```typescript
+export class EntityName extends BaseEntity {
+  // Only constructor and specified methods
+  // No additional public methods
+  // Follow exact pattern from example
+}
+```
+
+### Test Pattern
+
+```typescript
+describe('EntityName', () => {
+  describe('factoryMethod', () => {
+    it('should create instance with correct properties', () => {
+      // Specific test case
+    });
+  });
+});
+```
+
+### Command Pattern
+
+```typescript
+@CommandHandler(CommandName)
+export class CommandNameHandler {
+  constructor(private readonly repo: Repository) {}
+
+  async execute(command: CommandName): Promise<Result> {
+    // Validation
+    // Business logic
+    // Event publishing
+  }
+}
+```
+
+## Error Prevention
+
+Common mistakes to avoid:
+
+1. **Over-engineering**: Adding "helpful" extra methods
+2. **Pattern deviation**: "Improving" on existing patterns
+3. **Scope creep**: Fixing "related" issues
+4. **Premature optimization**: Making it "better"
+5. **Incomplete tests**: Missing edge cases
+
+## Completion Verification
+
+Before marking complete:
+
+```bash
+# Run tests
+npm test [specific test file]
+
+# Check linting
+npm run lint
+
+# Verify no unrelated changes
+git diff --name-only
+```
+
+## Success Criteria
+
+Implementation is complete when:
+
+- All ticket requirements met exactly
+- No additional functionality added
+- Tests provide full coverage
+- Code matches team patterns
+- PR contains only related changes
+
+## IMPORTANT: Approval Gates
+
+### Gate 1: Before Starting Implementation
+
+1. Create feature branch: `git checkout -b feature/[milestone-name]-[task-name]`
+   - Example: `git checkout -b feature/location-entity-create-entity`
+2. Confirm: "I'll implement all sub-issues for [Milestone Title] on branch [branch-name]. Should I proceed?"
+3. Wait for explicit approval (e.g., "yes", "go ahead", "proceed")
+4. Only start coding after confirmation
+
+### Gate 2: After Completing Implementation
+
+1. Show summary of all implemented files
+2. Run build and tests
+3. Fix any issues
+4. Ask: "All sub-issues implemented and tests pass. Ready to review the complete changeset?"
+5. Wait for approval before proceeding
+
+### Gate 3: Before Creating PR
+
+1. Show complete diff: `git diff --stat` and key changes
+2. Ask: "Implementation complete. All tests pass. Should I commit and create the PR?"
+3. Wait for explicit approval
+4. Only create PR after confirmation:
+   ```bash
+   git add .
+   git commit -m "feat: [milestone description]"
+   git push origin [branch-name]
+   ```
+
+This ensures developer maintains control throughout the implementation process.
+
+## Document Updates
+
+After implementation and PR creation:
+
+1. Update task list document:
+   - Add PR link and number for the milestone
+   - Update milestone progress (e.g., "In Review")
+   - Note all sub-issues are in review
+2. Update Linear:
+   - All sub-issues → "In Review"
+   - Add PR link to milestone issue
+
+After PR merge:
+
+1. Update task list document:
+   - Mark milestone as "Complete"
+   - Update PR status to "Merged"
+2. Update Linear:
+   - All sub-issues → "Done"
+   - Milestone issue → "Done"
+3. Ask: "Milestone X.Y complete! Ready to break down Milestone X.Z?"
+
+## Post-Merge Verification
+
+When returning after PR approval:
+
+1. Run: `git pull origin main` to get latest
+2. Verify PR was merged
+3. Update all tracking as described above
+4. Recommend next milestone based on dependencies
+
+# Implementation Prompt
+
+## Goal
+
+Implement ALL sub-issues for a milestone together, producing focused, high-quality code that matches existing patterns and passes all tests.
+
+## Required Context from Previous Steps
+
+- README configuration file with user ID and project settings
+- Linear milestone issue with all sub-issues
+- Task list document (showing progress across all milestones)
+- Codebase access (for patterns and integration)
+- PRD section (if additional clarification needed)
+- Any completed PRs from previous milestones
+
+## Linear Status Management
+
+### When Starting Implementation
+
+1. Update Linear statuses:
+   - Set milestone issue to "In Progress"
+   - Set ALL sub-issues to "In Progress" (batch update)
+2. Confirm: "Updated all Linear statuses to In Progress. Ready to implement?"
+
+### During Implementation
+
+- Implement ALL sub-issues together (they're interdependent)
+- Do NOT test individual sub-issues (they need each other to work)
+- Keep all code changes related to the milestone
+
+### After Implementation Complete
+
+1. Determine affected package(s) based on changed files:
+   - If changes in `packages/server/` → test in server package
+   - If changes in `packages/types/` → test in types package
+   - If changes span multiple packages → test each affected package
+
+2. Run package-specific build:
+   ```bash
+   # Example for server package:
+   cd packages/server && npm run build
+   ```
+
+3. Run package-specific tests:
+   ```bash
+   # In the same package directory:
+   npm test
+   # Or if specific test files:
+   npm test -- [test-file-pattern]
+   ```
+
+4. Fix any lint issues:
+   ```bash
+   # In the package directory:
+   npm run lint:fix
+   ```
+
+5. If changes affect multiple packages, test in dependency order:
+   ```bash
+   # Example: types first, then server
+   cd packages/types && npm run build && npm test
+   cd ../server && npm run build && npm test
+   ```
+
+6. Show summary of all changes
+
+### After PR Push
+
+- Update ALL sub-issues to "In Review" (batch update)
+- Update task list document with PR link
+
+### After PR Merge
+
+- Update ALL sub-issues to "Done"
+- Update milestone issue to "Done"
+
+## Input Required
+
+1. Milestone issue ID/URL from Linear
+2. Current task list state
+3. Related code files for patterns
+4. Dependencies that must be in place
+
+## Process
+
+### Step 1: Pre-Implementation Checklist
+
+Verify:
+
+- [ ] All dependencies are merged to main
+- [ ] Required patterns are accessible
+- [ ] File paths are confirmed
+- [ ] No conflicting work in progress
+
+### Step 2: Implementation Order
+
+Always follow this sequence:
+
+1. Create interfaces/types first
+2. Implement main functionality
+3. Add unit tests
+4. Verify all tests pass
+5. Self-review for patterns
+
+### Step 3: Implementation Guidelines
+
+## Output Format
+
+```markdown
+I'll implement all sub-issues for [Milestone Title].
+
+## Linear Status Update
+
+- Milestone issue [ID] → In Progress
+- All sub-issues → In Progress
+  [Show confirmation of status updates]
+
+## Implementation Plan
+
+1. [Sub-issue 1]: Create [specific functionality]
+2. [Sub-issue 2]: Add [specific functionality]
+3. [Sub-issue 3]: Implement [specific functionality]
+
+## Starting Implementation
+
+### Creating [file1.ts]
+
+[Show code being created]
+
+### Creating [file2.ts]
+
+[Show code being created]
+
+### Creating tests
+
+[Show test code]
+
+## Build & Test Results
+
+- Build: [PASS/FAIL]
+- Tests: [X passing]
+- Lint: [X issues fixed]
+
+## PR Ready Checklist
+
+- [ ] All sub-issues implemented
+- [ ] Code follows existing patterns
+- [ ] All tests pass
+- [ ] No lint errors
+- [ ] Branch pushed
+```
+
+## Implementation Rules
+
+### MUST:
+
+1. Implement EXACTLY what's specified
+2. Follow provided patterns precisely
+3. Include all required tests
+4. Use same naming conventions
+5. Match existing code style
+
+### MUST NOT:
+
+1. Add extra features
+2. Refactor existing code
+3. Change specified interfaces
+4. Make different architectural choices
+5. Include TODO comments
+
+## Common Patterns to Follow
+
+### Entity Pattern
+
+```typescript
+export class EntityName extends BaseEntity {
+  // Only constructor and specified methods
+  // No additional public methods
+  // Follow exact pattern from example
+}
+```
+
+### Test Pattern
+
+```typescript
+describe('EntityName', () => {
+  describe('factoryMethod', () => {
+    it('should create instance with correct properties', () => {
+      // Specific test case
+    });
+  });
+});
+```
+
+### Command Pattern
+
+```typescript
+@CommandHandler(CommandName)
+export class CommandNameHandler {
+  constructor(private readonly repo: Repository) {}
+
+  async execute(command: CommandName): Promise<Result> {
+    // Validation
+    // Business logic
+    // Event publishing
+  }
+}
+```
+
+## Error Prevention
+
+Common mistakes to avoid:
+
+1. **Over-engineering**: Adding "helpful" extra methods
+2. **Pattern deviation**: "Improving" on existing patterns
+3. **Scope creep**: Fixing "related" issues
+4. **Premature optimization**: Making it "better"
+5. **Incomplete tests**: Missing edge cases
+
+## Completion Verification
+
+Before marking complete:
+
+```bash
+# Run tests
+npm test [specific test file]
+
+# Check linting
+npm run lint
+
+# Verify no unrelated changes
+git diff --name-only
+```
+
+## Success Criteria
+
+Implementation is complete when:
+
+- All ticket requirements met exactly
+- No additional functionality added
+- Tests provide full coverage
+- Code matches team patterns
+- PR contains only related changes
+
+## IMPORTANT: Approval Gates
+
+### Gate 1: Before Starting Implementation
+
+1. Create feature branch: `git checkout -b feature/[milestone-name]-[task-name]`
+   - Example: `git checkout -b feature/location-entity-create-entity`
+2. Confirm: "I'll implement all sub-issues for [Milestone Title] on branch [branch-name]. Should I proceed?"
+3. Wait for explicit approval (e.g., "yes", "go ahead", "proceed")
+4. Only start coding after confirmation
+
+### Gate 2: After Completing Implementation
+
+1. Show summary of all implemented files
+2. Run build and tests
+3. Fix any issues
+4. Ask: "All sub-issues implemented and tests pass. Ready to review the complete changeset?"
+5. Wait for approval before proceeding
+
+### Gate 3: Before Creating PR
+
+1. Show complete diff: `git diff --stat` and key changes
+2. Ask: "Implementation complete. All tests pass. Should I commit and create the PR?"
+3. Wait for explicit approval
+4. Only create PR after confirmation:
+   ```bash
+   git add .
+   git commit -m "feat: [milestone description]"
+   git push origin [branch-name]
+   ```
+
+This ensures developer maintains control throughout the implementation process.
+
+## Document Updates
+
+After implementation and PR creation:
+
+1. Update task list document:
+   - Add PR link and number for the milestone
+   - Update milestone progress (e.g., "In Review")
+   - Note all sub-issues are in review
+2. Update Linear:
+   - All sub-issues → "In Review"
+   - Add PR link to milestone issue
+
+After PR merge:
+
+1. Update task list document:
+   - Mark milestone as "Complete"
+   - Update PR status to "Merged"
+2. Update Linear:
+   - All sub-issues → "Done"
+   - Milestone issue → "Done"
+3. Ask: "Milestone X.Y complete! Ready to break down Milestone X.Z?"
+
+## Post-Merge Verification
+
+When returning after PR approval:
+
+1. Run: `git pull origin main` to get latest
+2. Verify PR was merged
+3. Update all tracking as described above
+4. Recommend next milestone based on dependencies

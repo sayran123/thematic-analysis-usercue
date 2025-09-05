@@ -1,0 +1,386 @@
+---
+alwaysApply: false
+---
+# Task Breakdown Prompt
+
+## Goal
+Create detailed implementation tasks for a SINGLE milestone, with enough specificity for Linear ticket creation while maintaining flexibility for implementation discoveries.
+
+## Required Context from Previous Steps
+- Complete milestone list (from Milestone Generation)
+- Task list document showing all milestones with Linear IDs
+- PRD sections relevant to selected milestone
+- Current codebase structure
+
+## Input Required
+1. **Selected milestone** (e.g., "Let's work on Milestone 1.1: Nonprofit Location Fields")
+2. Milestone details from task list document
+3. Related PRD/technical documentation
+4. Codebase patterns and file locations
+5. Dependencies (which milestones are already complete)
+
+## Process
+
+### Step 1: Analyze Selected Milestone
+Review the milestone's:
+- Purpose and scope
+- Expected PR count and size
+- Dependencies
+- Risk factors
+
+### Step 2: Design Task Boundaries
+
+## Process
+
+### Step 1: Analyze Milestone Scope
+Identify:
+- Exact files to create/modify
+- Specific functionality to implement
+- Testing requirements
+- Integration points
+
+### Step 2: Design Task Boundaries
+
+Each task should:
+- Create/modify 1-3 closely related files
+- Represent 1-4 hours of focused work
+- Have clear completion criteria
+- Be testable in isolation
+- Follow a logical implementation order
+
+### Step 3: Generate Task Structure
+
+For each task:
+```markdown
+Task X: [Specific, Actionable Name]
+Files: [List exact files to create/modify]
+Pattern: [Codebase pattern to follow]
+Complexity: [Simple/Medium/Complex]
+Testing: [Unit/Integration/Both]
+```
+
+### Step 4: Order Tasks Logically
+
+Consider:
+- Technical dependencies (schema before entity)
+- Testing order (unit tests with implementation)
+- Review complexity (simpler tasks first)
+- Risk mitigation (unknowns early)
+
+## Output Format
+
+```markdown
+# Tasks for Milestone X.Y: [Milestone Name]
+
+## Overview
+[2-3 sentences about what this milestone accomplishes]
+
+## Task List
+
+### Task 1: [Specific Action]
+**Files to Create:**
+- `path/to/new/file.ts`
+- `path/to/new/file.test.ts`
+
+**Implementation Notes:**
+- Follow pattern from `existing/similar/file.ts`
+- Use factory pattern for entity creation
+- Include JSDoc comments
+
+**Acceptance Criteria:**
+- [ ] File created with proper structure
+- [ ] All methods have unit tests
+- [ ] Follows team coding standards
+
+### Task 2: [Specific Action]
+**Files to Modify:**
+- `path/to/existing/file.ts` (add field only)
+
+**Implementation Notes:**
+- Add `newField: Type` to existing interface
+- Update schema with backward compatibility
+- No breaking changes
+
+**Acceptance Criteria:**
+- [ ] Field added without breaking existing tests
+- [ ] Schema migration included if needed
+- [ ] Type definitions updated
+
+## PR Strategy
+
+**PR 1:** Tasks 1-2 (New entity and schema)
+**PR 2:** Tasks 3-4 (Commands and handlers)
+**PR 3:** Task 5 (Integration tests)
+
+## Risk Mitigation
+
+- If Task 2 conflicts with ongoing work, can defer to next milestone
+- Task 3 can be split if complexity emerges
+```
+
+## Examples
+
+### Good Task Breakdown
+```markdown
+Task 1: Create Location Entity
+Files: 
+- `domain/location/Location.entity.ts`
+- `domain/location/Location.entity.test.ts`
+Pattern: Follow Campaign.entity.ts
+Complexity: Simple
+Testing: Unit
+```
+
+### Bad Task Breakdown
+```markdown
+Task 1: Implement Location System
+Files: Multiple across system
+Pattern: Various
+Complexity: Unknown
+Testing: All types
+```
+
+## Just-in-Time Subtask Reminder
+
+Note: Detailed subtasks will be generated during implementation. This task list provides structure while maintaining flexibility for discoveries during coding.
+
+## Success Criteria
+
+Tasks should:
+- Map clearly to PR boundaries
+- Be implementable independently
+- Have obvious completion states
+- Minimize cross-file dependencies
+- Support incremental testing
+
+## IMPORTANT: Approval Gate
+
+**DO NOT proceed to create subtasks or Linear tickets until explicit approval**
+
+After generating tasks:
+1. Present the complete task breakdown
+2. Ask: "Does this task breakdown look good? Should I proceed with creating Linear tickets for these tasks?"
+3. Wait for explicit approval (e.g., "yes", "approved", "looks good")
+4. Only proceed to Linear ticket creation after confirmation
+
+If changes requested:
+- Update the task breakdown
+- Present revised version
+- Wait for approval again
+
+## Linear Sub-Issue Creation
+After approval, create Linear sub-issues:
+
+Parent: The milestone Linear issue
+Assignee: Use user ID from README
+Status: "Not Started" (NOT "Triage")
+Title Format: "Task X: [Name]"
+Description: Include implementation details and acceptance criteria
+
+## Document Updates
+
+After Linear sub-issue creation:
+1. Update the task list document with:
+   - All sub-issue IDs and URLs under the milestone
+   - Status tracking for each sub-issue
+   - Implementation notes for the PR
+2. Update milestone details with task breakdown
+3. Confirm: "Sub-issues created and task list updated. Ready to start implementation?"
+
+## Output for Next Step
+The implementation phase will:
+
+Work on ALL sub-issues together
+Create one PR for the entire milestone
+Update all Linear statuses together# Task Breakdown Prompt
+
+## Goal
+Create detailed implementation tasks for a SINGLE milestone, with enough specificity for Linear ticket creation while maintaining flexibility for implementation discoveries.
+
+## Required Context from Previous Steps
+- Complete milestone list (from Milestone Generation)
+- Task list document showing all milestones with Linear IDs
+- PRD sections relevant to selected milestone
+- Current codebase structure
+
+## Input Required
+1. **Selected milestone** (e.g., "Let's work on Milestone 1.1: Nonprofit Location Fields")
+2. Milestone details from task list document
+3. Related PRD/technical documentation
+4. Codebase patterns and file locations
+5. Dependencies (which milestones are already complete)
+
+## Process
+
+### Step 1: Analyze Selected Milestone
+Review the milestone's:
+- Purpose and scope
+- Expected PR count and size
+- Dependencies
+- Risk factors
+
+### Step 2: Design Task Boundaries
+
+## Process
+
+### Step 1: Analyze Milestone Scope
+Identify:
+- Exact files to create/modify
+- Specific functionality to implement
+- Testing requirements
+- Integration points
+
+### Step 2: Design Task Boundaries
+
+Each task should:
+- Create/modify 1-3 closely related files
+- Represent 1-4 hours of focused work
+- Have clear completion criteria
+- Be testable in isolation
+- Follow a logical implementation order
+
+### Step 3: Generate Task Structure
+
+For each task:
+```markdown
+Task X: [Specific, Actionable Name]
+Files: [List exact files to create/modify]
+Pattern: [Codebase pattern to follow]
+Complexity: [Simple/Medium/Complex]
+Testing: [Unit/Integration/Both]
+```
+
+### Step 4: Order Tasks Logically
+
+Consider:
+- Technical dependencies (schema before entity)
+- Testing order (unit tests with implementation)
+- Review complexity (simpler tasks first)
+- Risk mitigation (unknowns early)
+
+## Output Format
+
+```markdown
+# Tasks for Milestone X.Y: [Milestone Name]
+
+## Overview
+[2-3 sentences about what this milestone accomplishes]
+
+## Task List
+
+### Task 1: [Specific Action]
+**Files to Create:**
+- `path/to/new/file.ts`
+- `path/to/new/file.test.ts`
+
+**Implementation Notes:**
+- Follow pattern from `existing/similar/file.ts`
+- Use factory pattern for entity creation
+- Include JSDoc comments
+
+**Acceptance Criteria:**
+- [ ] File created with proper structure
+- [ ] All methods have unit tests
+- [ ] Follows team coding standards
+
+### Task 2: [Specific Action]
+**Files to Modify:**
+- `path/to/existing/file.ts` (add field only)
+
+**Implementation Notes:**
+- Add `newField: Type` to existing interface
+- Update schema with backward compatibility
+- No breaking changes
+
+**Acceptance Criteria:**
+- [ ] Field added without breaking existing tests
+- [ ] Schema migration included if needed
+- [ ] Type definitions updated
+
+## PR Strategy
+
+**PR 1:** Tasks 1-2 (New entity and schema)
+**PR 2:** Tasks 3-4 (Commands and handlers)
+**PR 3:** Task 5 (Integration tests)
+
+## Risk Mitigation
+
+- If Task 2 conflicts with ongoing work, can defer to next milestone
+- Task 3 can be split if complexity emerges
+```
+
+## Examples
+
+### Good Task Breakdown
+```markdown
+Task 1: Create Location Entity
+Files: 
+- `domain/location/Location.entity.ts`
+- `domain/location/Location.entity.test.ts`
+Pattern: Follow Campaign.entity.ts
+Complexity: Simple
+Testing: Unit
+```
+
+### Bad Task Breakdown
+```markdown
+Task 1: Implement Location System
+Files: Multiple across system
+Pattern: Various
+Complexity: Unknown
+Testing: All types
+```
+
+## Just-in-Time Subtask Reminder
+
+Note: Detailed subtasks will be generated during implementation. This task list provides structure while maintaining flexibility for discoveries during coding.
+
+## Success Criteria
+
+Tasks should:
+- Map clearly to PR boundaries
+- Be implementable independently
+- Have obvious completion states
+- Minimize cross-file dependencies
+- Support incremental testing
+
+## IMPORTANT: Approval Gate
+
+**DO NOT proceed to create subtasks or Linear tickets until explicit approval**
+
+After generating tasks:
+1. Present the complete task breakdown
+2. Ask: "Does this task breakdown look good? Should I proceed with creating Linear tickets for these tasks?"
+3. Wait for explicit approval (e.g., "yes", "approved", "looks good")
+4. Only proceed to Linear ticket creation after confirmation
+
+If changes requested:
+- Update the task breakdown
+- Present revised version
+- Wait for approval again
+
+## Linear Sub-Issue Creation
+After approval, create Linear sub-issues:
+
+Parent: The milestone Linear issue
+Assignee: Use user ID from README
+Status: "Not Started" (NOT "Triage")
+Title Format: "Task X: [Name]"
+Description: Include implementation details and acceptance criteria
+
+## Document Updates
+
+After Linear sub-issue creation:
+1. Update the task list document with:
+   - All sub-issue IDs and URLs under the milestone
+   - Status tracking for each sub-issue
+   - Implementation notes for the PR
+2. Update milestone details with task breakdown
+3. Confirm: "Sub-issues created and task list updated. Ready to start implementation?"
+
+## Output for Next Step
+The implementation phase will:
+
+Work on ALL sub-issues together
+Create one PR for the entire milestone
+Update all Linear statuses together

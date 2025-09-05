@@ -1,0 +1,50 @@
+{
+  "name": "thematic-analysis-usercue",
+  "version": "1.0.0",
+  "description": "LangGraph-powered thematic analysis pipeline for qualitative research",
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node src/main.js",
+    "dev": "node --inspect src/main.js",
+    "test": "echo 'TODO: Add test suite'",
+    "test-config": "node tests/test-config.js",
+    "lint": "echo 'TODO: Add ESLint configuration'",
+    "validate": "node -e 'import(\"./src/utils/config/constants.js\").then(m => console.log(m.validateConfig()))'"
+  },
+  "keywords": [
+    "thematic-analysis",
+    "qualitative-research",
+    "llm",
+    "langchain",
+    "langgraph",
+    "nlp"
+  ],
+  "author": "Research Team",
+  "license": "MIT",
+  "dependencies": {
+    "exceljs": "^4.4.0"
+  },
+  "futuredependencies": {
+    "@langchain/core": "^0.2.31",
+    "@langchain/openai": "^0.2.8",
+    "langchain": "^0.2.17",
+    "langgraph": "^0.1.19",
+    "langsmith": "^0.1.57"
+  },
+  "devDependencies": {
+    "eslint": "^8.0.0",
+    "jest": "^29.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "TODO: Add repository URL"
+  },
+  "bugs": {
+    "url": "TODO: Add issues URL"
+  },
+  "homepage": "TODO: Add homepage URL"
+}

@@ -1,0 +1,723 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+
+# Thematic Analysis Pipeline - Complete Architecture
+
+## Project Structure
+
+```
+src/
+├── data/
+│   ├── extractors/
+│   │   ├── excel-extractor.js       # Dynamic Excel parsing
+│   │   └── validator.js             # Data validation utilities
+│   ├── parsers/
+│   │   └── response-parser.js       # Clean and structure responses
+│   └── models/
+│       └── data-models.js           # TypeScript interfaces/data structures
+├── analysis/
+│   ├── agents/
+│   │   ├── theme-generator.js       # LLM: Generate themes + derive questions
+│   │   ├── classifier.js            # LLM: Classify responses to themes
+│   │   ├── quote-extractor.js       # LLM: Extract supporting quotes with validation
+│   │   └── summarizer.js            # LLM: Generate headlines and summaries
+│   ├── workflows/
+│   │   ├── question-analyzer.js     # LangGraph: Single question stateful workflow
+│   │   └── parallel-orchestrator.js # LangGraph: Parallel question processing
+│   └── prompts/
+│       ├── theme-generation.js      # Theme generation + question ID prompt templates
+│       ├── classification.js        # Response classification prompts
+│       ├── quote-extraction.js      # Quote extraction prompts
+│       └── summarization.js         # Summary generation prompts
+├── outputs/
+│   ├── generators/
+│   │   ├── json-generator.js        # Main results JSON output
+│   │   ├── excel-generator.js       # Classification inspection files
+│   │   └── summary-generator.js     # Executive summary markdown
+│   └── templates/
+│       └── report-template.js       # Output structure templates
+├── utils/
+│   ├── config/
+│   │   ├── constants.js             # Configuration constants
+│   │   └── llm-config.js            # LangChain/LangSmith setup
+│   ├── helpers/
+│   │   ├── file-utils.js            # File I/O utilities
+│   │   └── validation.js            # Data validation helpers
+│   └── validation/
+│       ├── quote-validator.js       # CRITICAL: Quote hallucination prevention
+│       └── theme-validator.js       # Theme quality validation
+└── main.js                          # Entry point orchestrator
+
+inputs/
+├── data.xlsx                        # Interview data
+└── project_background.txt           # Project context constant
+
+outputs/                             # Generated during execution
+├── thematic_analysis_results.json
+├── executive_summary.md
+└── [questionId]_classifications.xlsx (per question)
+```
+
+---
+
+## End-to-End Flow Architecture
+
+```mermaid
+graph TD
+    A[inputs/data.xlsx] --> B[Data Extractor]
+    A1[inputs/project_background.txt] --> B
+    
+    B --> C[Response Parser]
+    C --> D[LangGraph Parallel Orchestrator]
+    
+    D --> E1[Question 1 State Pipeline]
+    D --> E2[Question 2 State Pipeline] 
+    D --> E3[Question 3-6 State Pipelines]
+    
+    subgraph "Question 1 Sequential State Pipeline"
+        E1 --> G1[State: Raw Data]
+        G1 --> H1[Theme Generator + Question ID Agent 🤖]
+        H1 --> I1[State: Themes + Question Generated]
+        I1 --> J1[Classifier Agent 🤖]
+        J1 --> K1[State: Classifications Done]
+        K1 --> L1[Quote Extractor + Validator Agent 🤖]
+        L1 --> M1[State: Quotes Extracted & Verified]
+        M1 --> N1[Summarizer Agent 🤖]
+        N1 --> O1[State: Analysis Complete]
+    end
+    
+    subgraph "Question 2 Sequential State Pipeline"
+        E2 --> G2[State: Raw Data]
+        G2 --> H2[Theme Generator + Question ID Agent 🤖]
+        H2 --> I2[State: Themes + Question Generated]
+        I2 --> J2[Classifier Agent 🤖]
+        J2 --> K2[State: Classifications Done]
+        K2 --> L2[Quote Extractor + Validator Agent 🤖]
+        L2 --> M2[State: Quotes Extracted & Verified]
+        M2 --> N2[Summarizer Agent 🤖]
+        N2 --> O2[State: Analysis Complete]
+    end
+    
+    E3 --> P[Question 3-6 Similar Pipelines]
+    
+    O1 --> Q[Results Aggregator]
+    O2 --> Q
+    P --> Q
+    
+    Q --> R[Output Generators]
+    
+    R --> S1[thematic_analysis_results.json]
+    R --> S2[executive_summary.md]
+    R --> S3[classification files.xlsx]
+    
+    style H1 fill:#ff9999
+    style J1 fill:#ff9999
+    style L1 fill:#ff9999
+    style N1 fill:#ff9999
+    style H2 fill:#ff9999
+    style J2 fill:#ff9999
+    style L2 fill:#ff9999
+    style N2 fill:#ff9999
+```
+
+🤖 = LLM API Call Points (4+ per question × 6 questions = 24+ total LLM calls due to validation retries)
+
+**Concurrency Model:**
+- **6 Questions run in parallel** (concurrent execution)
+- **Each question has a sequential 4-stage pipeline** managed by LangGraph state
+- **State flows through**: Raw Data → Themes+Question → Classifications → Quotes+Validation → Summary
+
+---
+
+## Phase-by-Phase Architecture
+
+### Phase 1: Data Extraction (`src/data/extractors/`)
+
+**Input:** 
+- `inputs/data.xlsx`
+- `inputs/project_background.txt`
+
+**Process:**
+```javascript
+// src/data/extractors/excel-extractor.js
+FUNCTION extractDataFromExcel() {
+  projectBackground = readFile('inputs/project_background.txt')
+  rawData = parseExcel('inputs/data.xlsx')
+  
+  // Dynamic column detection
+  headers = rawData[0]
+  questions = []
+  
+  // Extract questions from columns 1+ (everything after participant ID column)
+  FOR columnIndex = 1 TO headers.length - 1 {
+    IF headers[columnIndex] exists AND headers[columnIndex].trim() !== "" {
+      questions.push({
+        columnIndex: columnIndex,
+        questionId: headers[columnIndex],  // e.g., "vpn_selection"
+        headerText: headers[columnIndex]
+      })
+    }
+  }
+  
+  // Extract participant responses with cell-by-cell content checking
+  participantResponses = []
+  FOR each dataRow {
+    participantId = row[0]  // Column A always contains participant ID
+    
+    IF participantId exists AND participantId.trim() !== "" {
+      FOR each question in questions {
+        cellValue = row[question.columnIndex]
+        
+        // Check if cell has any content
+        IF cellValue exists AND cellValue.trim() !== "" {
+          
+          participantResponses.push({
+            participantId: participantId,
+            questionId: question.questionId,
+            response: cellValue.trim()  // Raw conversation format preserved
+          })
+        }
+      }
+    }
+  }
+  
+  // Calculate statistics per question based on actual responses
+  questionStats = {}
+  FOR each question in questions {
+    responseCount = participantResponses.filter(r => r.questionId === question.questionId).length
+    questionStats[question.questionId] = {
+      totalResponses: responseCount,
+      participantCount: responseCount  // Each response = 1 participant for this question
+    }
+  }
+  
+  RETURN {
+    projectBackground,
+    questions,
+    participantResponses,
+    questionStats,
+    metadata: {
+      totalParticipants: getUniqueParticipantCount(participantResponses),
+      totalQuestions: questions.length,
+      totalResponses: participantResponses.length
+    }
+  }
+}
+```
+
+**Output:**
+```javascript
+{
+  projectBackground: "The primary goal of this research study...",
+  questions: [
+    { columnIndex: 1, questionId: "vpn_selection", headerText: "vpn_selection" },
+    { columnIndex: 2, questionId: "unmet_needs_private_location", headerText: "unmet_needs_private_location" }
+    // ... dynamic number of questions based on non-empty columns
+  ],
+  participantResponses: [
+    {
+      participantId: "4434",
+      questionId: "vpn_selection", 
+      response: "assistant: When it comes to choosing a VPN...\nuser: not in US or EU data protection policies"
+    }
+    // ... all responses where cells had content
+  ],
+  questionStats: {
+    "vpn_selection": { totalResponses: 106, participantCount: 106 },
+    "unmet_needs_private_location": { totalResponses: 106, participantCount: 106 },
+    "remove_data_steps_probe_yes": { totalResponses: 60, participantCount: 60 },
+    "remove_data_steps_probe_no": { totalResponses: 46, participantCount: 46 }
+  },
+  metadata: { totalParticipants: 106, totalQuestions: 6, totalResponses: 568 }
+}
+```
+
+---
+
+### Phase 2: Response Parsing (`src/data/parsers/`)
+
+**Input:** Phase 1 output
+
+**Process:**
+```javascript
+// src/data/parsers/response-parser.js
+FUNCTION parseAndCleanResponses(extractedData) {
+  cleanedResponses = []
+  
+  FOR each response in extractedData.participantResponses {
+    // Keep raw format but validate
+    IF isValidResponse(response.response) {
+      cleanedResponses.push({
+        participantId: response.participantId,
+        questionId: response.questionId,
+        cleanResponse: response.response.trim(), // Raw conversation preserved
+        responseLength: response.response.length
+      })
+    }
+  }
+  
+  // Group by question for parallel processing
+  responsesByQuestion = groupBy(cleanedResponses, 'questionId')
+  
+  RETURN {
+    projectBackground: extractedData.projectBackground,
+    questions: extractedData.questions,
+    responsesByQuestion,
+    questionStats: extractedData.questionStats
+  }
+}
+```
+
+---
+
+### Phase 3: Parallel Thematic Analysis with State Management (`src/analysis/workflows/`)
+
+**Input:** Phase 2 output
+
+**LLM Integration:** 4+ sequential agents per question × 6 questions = 24+ total LLM calls (retries increase count)
+
+**Process:**
+```javascript
+// src/analysis/workflows/parallel-orchestrator.js (LangGraph)
+ASYNC FUNCTION parallelThematicAnalysis(cleanedData) {
+  // Create parallel workflows for each question
+  analysisPromises = cleanedData.questions.map(question => 
+    runQuestionAnalysisWorkflow({
+      question,
+      responses: cleanedData.responsesByQuestion[question.questionId],
+      projectBackground: cleanedData.projectBackground,
+      stats: cleanedData.questionStats[question.questionId]
+    })
+  )
+  
+  // Execute all 6 questions concurrently
+  results = await Promise.all(analysisPromises)
+  RETURN results
+}
+
+// src/analysis/workflows/question-analyzer.js (LangGraph State Machine)
+STATE QuestionAnalysisState {
+  question: Question              # Contains questionId and headerText
+  responses: ParticipantResponse[]
+  projectBackground: string
+  stats: QuestionStats
+  
+  // State progression fields
+  themes: Theme[] | null
+  derivedQuestion: string | null  # Question identification moved to theme stage
+  classifications: Classification[] | null  
+  quotes: QuotesByTheme | null
+  summary: Summary | null
+}
+
+WORKFLOW QuestionAnalysisWorkflow {
+  START -> generateThemes -> classifyResponses -> extractQuotes -> generateSummary -> END
+  
+  NODE generateThemes(state) {
+    // LLM Call 1: Question Identification + Theme Generation (COMBINED)
+    result = await themeGeneratorAgent.invoke({
+      questionId: state.question.questionId,
+      responses: state.responses.map(r => r.cleanResponse),
+      projectBackground: state.projectBackground
+    })
+    
+    RETURN { 
+      ...state, 
+      themes: result.themes,
+      derivedQuestion: result.derivedQuestion  # Question derived here
+    }
+  }
+  
+  NODE classifyResponses(state) {
+    // LLM Call 2: Classification (receives themes from previous state)
+    classifications = await classifierAgent.invoke({
+      derivedQuestion: state.derivedQuestion,
+      themes: state.themes,
+      responses: state.responses,
+      projectBackground: state.projectBackground
+    })
+    
+    RETURN { ...state, classifications }
+  }
+  
+  NODE extractQuotes(state) {
+    // LLM Call 3: Quote Extraction with VALIDATION RETRY LOGIC
+    quotes = await quoteExtractorAgent.invoke({
+      themes: state.themes,
+      classifications: state.classifications,
+      responses: state.responses
+    })
+    
+    RETURN { ...state, quotes }
+  }
+  
+  NODE generateSummary(state) {
+    // LLM Call 4: Summary Generation (receives derived question from theme stage)
+    summary = await summarizerAgent.invoke({
+      derivedQuestion: state.derivedQuestion,  # Pre-identified question
+      themes: state.themes,
+      classifications: state.classifications,
+      stats: state.stats,
+      projectBackground: state.projectBackground
+    })
+    
+    RETURN { ...state, summary }
+  }
+}
+```
+
+**LLM Agent Implementations:**
+
+```javascript
+// src/analysis/agents/theme-generator.js
+AGENT ThemeGeneratorAgent {
+  prompt = loadPrompt('theme-generation', {
+    instructions: `
+    DUAL RESPONSIBILITY:
+    1. First, derive the actual research question being answered from conversation patterns
+    2. Then generate 3-5 themes that answer that question
+    
+    Focus ONLY on user responses, ignore assistant questions.
+    Raw responses contain 'assistant:' and 'user:' - analyze only user parts.
+    
+    The questionId is just a column header - look at actual response patterns to understand 
+    what question participants were answering.
+    `
+  })
+  
+  // LLM API Call - Now handles question identification + theme generation
+  FUNCTION invoke(input) {
+    return llm.invoke(formatPrompt(prompt, {
+      questionId: input.questionId,       // Column header ID for context
+      responses: input.responses,         // Full conversation data
+      projectBackground: input.projectBackground
+    }))
+    
+    // Expected output format:
+    // {
+    //   derivedQuestion: "What features do you consider when choosing a VPN?",
+    //   themes: [
+    //     { title: "Privacy and No-Logs Policies", description: "...", estimatedParticipants: 38 }
+    //   ]
+    // }
+  }
+}
+
+// src/analysis/agents/quote-extractor.js
+AGENT QuoteExtractorAgent {
+  prompt = loadPrompt('quote-extraction', {
+    instructions: `
+    Extract VERBATIM quotes that support each theme.
+    CRITICAL: Quotes must be word-for-word from user responses only.
+    
+    Rules:
+    - Extract only from 'user:' portions of conversations
+    - Maximum 3 quotes per theme
+    - Maximum 1 quote per participant per theme  
+    - Quotes must be substantial (>10 words typically)
+    - Return exact participant ID for each quote
+    `
+  })
+  
+  // LLM API Call with retry logic for hallucination
+  ASYNC FUNCTION invoke(input) {
+    maxRetries = 3
+    
+    FOR attempt = 1 TO maxRetries {
+      quotesResult = await llm.invoke(formatPrompt(prompt, input))
+      
+      // CRITICAL: Validate quotes before accepting
+      validationResult = await QuoteValidator.validateQuotes({
+        selectedQuotes: quotesResult.quotes,
+        responses: input.responses,
+        themes: input.themes,
+        classifications: input.classifications
+      })
+      
+      IF validationResult.passed {
+        RETURN quotesResult
+      } ELSE {
+        console.warn(`Quote validation failed on attempt ${attempt}:`, validationResult.errors)
+        // Add validation errors to prompt context for retry
+        input.previousErrors = validationResult.errors
+      }
+    }
+    
+    // If all retries failed, return with validation warnings
+    THROW new Error("Quote extraction failed validation after max retries")
+  }
+}
+
+// src/analysis/agents/summarizer.js  
+AGENT SummarizerAgent {
+  prompt = loadPrompt('summarization', {
+    instructions: `
+    Generate engaging headline and summary for the completed analysis.
+    The research question has already been identified by the ThemeGenerator.
+    Focus on synthesizing the thematic findings.
+    `
+  })
+  
+  // LLM API Call - Receives research question from themes stage
+  FUNCTION invoke(input) {
+    return llm.invoke(formatPrompt(prompt, {
+      derivedQuestion: input.derivedQuestion,    // From ThemeGenerator
+      themes: input.themes,
+      classifications: input.classifications,
+      stats: input.stats,
+      projectBackground: input.projectBackground
+    }))
+  }
+}
+```
+
+**Output:**
+```javascript
+[
+  {
+    questionId: "vpn_selection",
+    derivedQuestion: "What are the most important features you consider when choosing a VPN?", // Derived by ThemeGenerator LLM
+    participantCount: 106,
+    headline: "Privacy Protection and No-Logs Policies Drive VPN Selection",
+    summary: "VPN users prioritize privacy-focused features...",
+    themes: [
+      {
+        title: "Privacy and No-Logs Policies",
+        description: "Users prioritize VPN providers that...",
+        participantCount: 38,
+        supportingQuotes: [
+          { 
+            quote: "not in US or EU data protection policies", 
+            participantId: "4434",
+            verified: true  // Quote validation passed
+          }
+        ]
+      }
+      // ... 3-4 more themes
+    ],
+    classifications: { "4434": "Privacy and No-Logs Policies", ... }
+  }
+  // ... 5 more question analyses
+]
+```
+
+---
+
+### Phase 4: Output Generation (`src/outputs/generators/`)
+
+**Input:** Phase 3 output array
+
+**Process:**
+```javascript
+// src/outputs/generators/json-generator.js
+FUNCTION generateMainResults(analyses) {
+  finalReport = {
+    projectSummary: generateProjectOverview(analyses),
+    timestamp: new Date().toISOString(),
+    metadata: {
+      totalQuestions: analyses.length,
+      totalParticipants: calculateUniqueParticipants(analyses),
+      processingTime: calculateDuration()
+    },
+    questionAnalyses: analyses
+  }
+  
+  writeFile('outputs/thematic_analysis_results.json', finalReport)
+}
+
+// src/outputs/generators/excel-generator.js  
+FUNCTION generateClassificationFiles(analyses) {
+  FOR each analysis in analyses {
+    classificationData = {
+      headers: ['ParticipantID', 'Response', 'AssignedTheme'],
+      rows: analysis.classifications.map(c => [
+        c.participantId,
+        getOriginalResponse(c.participantId, analysis.questionId),
+        c.theme
+      ])
+    }
+    writeExcel(`outputs/${analysis.questionId}_classifications.xlsx`, classificationData)
+  }
+}
+```
+
+---
+
+## Key Architecture Features
+
+### **Quote Validation & Hallucination Prevention**
+```javascript
+// src/utils/validation/quote-validator.js
+SERVICE QuoteValidator {
+  /**
+   * CRITICAL: Validate all quotes exist verbatim in source conversations
+   * This prevents hallucination - the #1 accuracy issue
+   */
+  FUNCTION validateQuotes(validationInput) {
+    errors = []
+    warnings = []
+    
+    FOR each theme in validationInput.themes {
+      quotes = validationInput.selectedQuotes.get(theme.id)
+      
+      FOR each quote in quotes {
+        // Find source conversation
+        conversation = validationInput.responses.find(
+          r => r.participantId === quote.participantId
+        )
+        
+        IF !conversation {
+          errors.push(`No conversation found for participant ${quote.participantId}`)
+          CONTINUE
+        }
+        
+        // Extract user responses only
+        userText = extractUserResponsesOnly(conversation.cleanResponse)
+        
+        // Verify quote exists verbatim
+        isValid = validateQuoteExistsVerbatim(quote.text, userText)
+        
+        IF !isValid {
+          errors.push(`HALLUCINATED QUOTE: "${quote.text.substring(0, 50)}..." for participant ${quote.participantId}`)
+          quote.verified = false
+        } ELSE {
+          quote.verified = true
+        }
+      }
+    }
+    
+    RETURN {
+      passed: errors.length === 0,
+      errors,
+      warnings
+    }
+  }
+  
+  /**
+   * Core validation: Exact text matching with normalization
+   */
+  FUNCTION validateQuoteExistsVerbatim(quoteText, conversationUserText) {
+    // Handle multi-part quotes (joined with ' ... ')
+    quoteParts = quoteText.split(' ... ')
+    
+    RETURN quoteParts.every(part => {
+      // Normalize for comparison (preserve meaning, ignore punctuation/case)
+      normalizedQuote = part.trim().toLowerCase().replace(/[^\w\s]/g, '')
+      normalizedConversation = conversationUserText.toLowerCase().replace(/[^\w\s]/g, '')
+      
+      exists = normalizedConversation.includes(normalizedQuote)
+      
+      IF !exists {
+        console.error(`Quote verification failed: "${part}"`)
+        console.error(`In conversation: "${conversationUserText.substring(0, 200)}..."`)
+      }
+      
+      RETURN exists
+    })
+  }
+  
+  /**
+   * Extract only user responses from conversation format
+   */
+  FUNCTION extractUserResponsesOnly(conversationText) {
+    // Parse "assistant: ... user: ... assistant: ... user: ..." format
+    userResponses = conversationText
+      .split(/(?:assistant:|user:)/)
+      .filter((text, index) => {
+        // Get text following 'user:' markers
+        return index > 0 && conversationText.split(/(?:assistant:|user:)/)[index-1].trim().endsWith('user')
+      })
+      .map(response => response.trim())
+      .filter(response => response.length > 0)
+    
+    RETURN userResponses.join(' ')
+  }
+}
+
+// src/utils/validation/theme-validator.js  
+SERVICE ThemeValidator {
+  /**
+   * Validate theme quality and coverage
+   */
+  FUNCTION validateThemes(themes, classifications, responses) {
+    errors = []
+    warnings = []
+    
+    // Check theme count (3-5 optimal)
+    IF themes.length < 3 {
+      warnings.push(`Only ${themes.length} themes - consider if more granularity needed`)
+    }
+    IF themes.length > 5 {
+      warnings.push(`${themes.length} themes - consider consolidating similar themes`)
+    }
+    
+    // Check for generic themes
+    genericPatterns = [
+      /various\s+(reasons|concerns|factors)/i,
+      /mixed\s+(reactions|opinions|feelings)/i, 
+      /different\s+(views|perspectives|approaches)/i,
+      /some\s+users?\s+(want|prefer|think)/i
+    ]
+    
+    FOR each theme in themes {
+      // Detect generic theme titles
+      IF genericPatterns.some(pattern => pattern.test(theme.title)) {
+        errors.push(`Generic theme detected: "${theme.title}" - be more specific`)
+      }
+      
+      // Check theme coverage
+      participantCount = classifications.filter(c => c.themeId === theme.id).length
+      
+      IF participantCount === 0 {
+        errors.push(`No participants classified to theme: "${theme.title}"`)
+      } ELSE IF participantCount < 3 {
+        warnings.push(`Low participation in "${theme.title}": ${participantCount} participants`)
+      }
+      
+      // Validate theme answers the research question
+      IF !themeAnswersQuestion(theme.title, theme.description) {
+        warnings.push(`Theme "${theme.title}" may not directly answer the research question`)
+      }
+    }
+    
+    RETURN {
+      passed: errors.length === 0,
+      errors,
+      warnings
+    }
+  }
+}
+```
+
+### **Concurrency & State Management**
+- **LangGraph Parallel Mapping**: 6 questions processed simultaneously
+- **Per-Question Sequential State Pipelines**: Each question flows through 4 stages with managed state
+- **State Progression**: Raw Data → Themes+Question → Classifications → Quotes+Validation → Summary
+- **Total LLM Calls**: 24+ (4 per question × 6 questions + retry calls for validation failures)
+
+### **LLM Integration Points - Updated Flow**
+1. **Theme Generator + Question Identifier Agent** (6 calls - derives question + generates themes)
+2. **Classifier Agent** (6 calls - receives derived question + themes from state)
+3. **Quote Extractor Agent with Validation** (6+ calls - retries on hallucination detection)
+4. **Summarizer Agent** (6 calls - receives pre-identified question for synthesis)
+
+### **Data Flow Integrity**
+- Raw conversation format preserved throughout pipeline
+- **Theme Generator agent derives research question** from questionId + response patterns
+- **Quote Validator prevents hallucination** with exact text matching and retry logic
+- Classification audit trails maintained for accuracy verification
+- Cell-by-cell content checking determines participant counts per question
+- **User response extraction** isolates actual participant answers from assistant prompts
+
+### **Scalability**
+- Dynamic question detection (works with any number of columns)
+- Configurable theme counts and quote limits
+- Reusable across different research domains via `project_background` parameter
+- Handles variable response counts per question (e.g., 106 vs 60 vs 46 responses)
+- **Theme Generator intelligently derives research questions** from context rather than parsing conversation prompts
+- **Robust quote validation with retry mechanisms** prevents pipeline failures from hallucination
+
+This architecture provides clear state management, proper concurrency handling, and ensures the actual research question is intelligently derived early in the pipeline, while implementing comprehensive validation to prevent quote hallucination - the critical accuracy requirement.

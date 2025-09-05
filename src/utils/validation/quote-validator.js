@@ -1,386 +1,452 @@
 /**
- * TODO: CRITICAL: Quote hallucination prevention
+ * Quote validation & hallucination prevention
  * 
- * This is the most critical module in the pipeline for ensuring accuracy.
- * Validates that all quotes exist verbatim in source conversations to prevent LLM hallucination.
+ * This module validates that extracted quotes exist verbatim in source conversations.
+ * Critical for preventing LLM hallucination - the #1 accuracy requirement.
  */
 
-// TODO: Add necessary imports
-// import { VALIDATION_CONFIG } from '../config/constants.js';
+import { VALIDATION_CONFIG } from '../config/constants.js';
 
 /**
- * Quote Validator Service - Critical for accuracy
+ * Quote Validator Service
+ * Implements comprehensive quote validation to prevent hallucination
  */
 export class QuoteValidator {
   constructor(options = {}) {
     this.config = {
-      exactMatchRequired: options.exactMatchRequired !== false,
-      normalizeWhitespace: options.normalizeWhitespace !== false,
-      ignoreCase: options.ignoreCase === true,
-      ignorePunctuation: options.ignorePunctuation !== false,
-      allowPartialQuotes: options.allowPartialQuotes === true,
-      ...options
+      // Text normalization settings
+      preserveCase: options.preserveCase || false,
+      preservePunctuation: options.preservePunctuation || false,
+      allowPartialMatches: options.allowPartialMatches || false,
+      minQuoteLength: options.minQuoteLength || 3, // Minimum words for validation
+      
+      // Multi-part quote settings
+      multiPartSeparator: options.multiPartSeparator || ' ... ',
+      
+      // Performance settings
+      maxConversationLength: options.maxConversationLength || 10000, // chars
+      enableDetailedLogging: options.enableDetailedLogging || false
     };
   }
 
   /**
-   * CRITICAL: Validate all quotes exist verbatim in source conversations
-   * This prevents hallucination - the #1 accuracy issue
-   * @param {Object} validationInput - Input containing quotes, themes, responses, classifications
-   * @returns {Object} Validation result with detailed errors
+   * Validate all quotes exist verbatim in source conversations
+   * @param {Object} validationInput - Input containing quotes, responses, themes, classifications
+   * @returns {Object} Validation result with errors and warnings
    */
   validateQuotes(validationInput) {
-    // TODO: Implement comprehensive quote validation
-    // - Validate each quote against source conversations
-    // - Check participant attribution is correct
-    // - Verify quotes are from user responses only
-    // - Handle multi-part quotes properly
-    // - Return detailed error information for retry logic
-    
-    const { selectedQuotes, responses, themes, classifications } = validationInput;
     const errors = [];
     const warnings = [];
-    const validatedQuotes = new Map();
 
     try {
-      // Validate input structure
-      this.validateInputStructure(validationInput);
+      // Basic input validation
+      const inputValidation = this.validateInput(validationInput);
+      if (inputValidation.error) {
+        return { passed: false, errors: [inputValidation.error], warnings: [] };
+      }
 
-      // Process each theme's quotes
+      const { selectedQuotes, responses, themes, classifications } = validationInput;
+
+      // Create participant lookup for fast access
+      const participantLookup = this.createParticipantLookup(responses);
+
+      // Validate each theme's quotes
       for (const theme of themes) {
-        const themeQuotes = selectedQuotes.get ? selectedQuotes.get(theme.id) : selectedQuotes[theme.id];
+        const themeQuotes = selectedQuotes[theme.id] || [];
         
-        if (!themeQuotes || themeQuotes.length === 0) {
-          warnings.push(`No quotes provided for theme: ${theme.title}`);
-          continue;
-        }
+        // Validate quotes for this theme
+        const themeValidation = this.validateThemeQuotes(
+          theme, 
+          themeQuotes, 
+          participantLookup, 
+          classifications
+        );
+        
+        errors.push(...themeValidation.errors);
+        warnings.push(...themeValidation.warnings);
+      }
 
-        const validatedThemeQuotes = [];
+      // Additional validation checks
+      const additionalChecks = this.performAdditionalValidation(
+        selectedQuotes, 
+        themes, 
+        classifications, 
+        participantLookup
+      );
+      
+      errors.push(...additionalChecks.errors);
+      warnings.push(...additionalChecks.warnings);
 
-        for (const quote of themeQuotes) {
-          try {
-            const validationResult = this.validateSingleQuote(quote, responses, theme);
-            
-            if (validationResult.isValid) {
-              validatedThemeQuotes.push({
-                ...quote,
-                verified: true,
-                validationInfo: validationResult.info
-              });
-            } else {
-              errors.push(validationResult.error);
-              validatedThemeQuotes.push({
-                ...quote,
-                verified: false,
-                validationError: validationResult.error
-              });
-            }
-          } catch (error) {
-            errors.push(`Quote validation failed for participant ${quote.participantId}: ${error.message}`);
-          }
-        }
+      const passed = errors.length === 0;
 
-        validatedQuotes.set(theme.id, validatedThemeQuotes);
+      if (this.config.enableDetailedLogging) {
+        console.log(`[QUOTE VALIDATOR] Validation ${passed ? 'PASSED' : 'FAILED'}`);
+        console.log(`[QUOTE VALIDATOR] Errors: ${errors.length}, Warnings: ${warnings.length}`);
       }
 
       return {
-        passed: errors.length === 0,
+        passed,
         errors,
         warnings,
-        validatedQuotes
+        totalQuotesValidated: this.countTotalQuotes(selectedQuotes),
+        themeQuoteCounts: this.getThemeQuoteCounts(selectedQuotes)
       };
 
     } catch (error) {
       return {
         passed: false,
-        errors: [`Quote validation system error: ${error.message}`],
-        warnings,
-        validatedQuotes: new Map()
+        errors: [`Quote validation failed: ${error.message}`],
+        warnings: []
       };
     }
+  }
+
+  /**
+   * Validate quotes for a specific theme
+   * @param {Object} theme - Theme object
+   * @param {Array} themeQuotes - Quotes for this theme
+   * @param {Object} participantLookup - Participant conversation lookup
+   * @param {Array} classifications - Response classifications
+   * @returns {Object} Theme validation result
+   */
+  validateThemeQuotes(theme, themeQuotes, participantLookup, classifications) {
+    const errors = [];
+    const warnings = [];
+
+    for (const quote of themeQuotes) {
+      const quoteValidation = this.validateSingleQuote(
+        quote, 
+        theme, 
+        participantLookup, 
+        classifications
+      );
+      
+      errors.push(...quoteValidation.errors);
+      warnings.push(...quoteValidation.warnings);
+    }
+
+    return { errors, warnings };
   }
 
   /**
    * Validate a single quote against source conversation
-   * @param {Object} quote - Quote object with text and participantId
-   * @param {Array} responses - All participant responses
-   * @param {Object} theme - Theme context
-   * @returns {Object} Validation result for single quote
+   * @param {Object} quote - Quote object with quote text and participantId
+   * @param {Object} theme - Theme object
+   * @param {Object} participantLookup - Participant conversation lookup  
+   * @param {Array} classifications - Response classifications
+   * @returns {Object} Single quote validation result
    */
-  validateSingleQuote(quote, responses, theme) {
-    // TODO: Implement single quote validation
-    try {
-      // Find source conversation
-      const conversation = responses.find(r => r.participantId === quote.participantId);
-      
-      if (!conversation) {
-        return {
-          isValid: false,
-          error: `No conversation found for participant ${quote.participantId}`
-        };
-      }
+  validateSingleQuote(quote, theme, participantLookup, classifications) {
+    const errors = [];
+    const warnings = [];
 
-      // Extract user responses only
-      const userText = this.extractUserResponsesOnly(conversation.cleanResponse || conversation.response);
-      
-      if (!userText || userText.trim().length === 0) {
-        return {
-          isValid: false,
-          error: `No user responses found in conversation for participant ${quote.participantId}`
-        };
-      }
-
-      // Verify quote exists verbatim
-      const existsVerbatim = this.validateQuoteExistsVerbatim(quote.quote, userText);
-      
-      if (!existsVerbatim.isValid) {
-        return {
-          isValid: false,
-          error: `HALLUCINATED QUOTE: "${quote.quote.substring(0, 50)}..." not found in participant ${quote.participantId} responses. ${existsVerbatim.details}`
-        };
-      }
-
-      return {
-        isValid: true,
-        info: {
-          foundAt: existsVerbatim.position,
-          matchType: existsVerbatim.matchType,
-          userTextLength: userText.length
-        }
-      };
-
-    } catch (error) {
-      return {
-        isValid: false,
-        error: `Quote validation error: ${error.message}`
-      };
+    // 1. Validate quote structure
+    if (!quote.quote || typeof quote.quote !== 'string' || quote.quote.trim() === '') {
+      errors.push(`Empty or invalid quote for theme "${theme.title}"`);
+      return { errors, warnings };
     }
+
+    if (!quote.participantId || typeof quote.participantId !== 'string') {
+      errors.push(`Missing participantId for quote: "${quote.quote.substring(0, 50)}..."`);
+      return { errors, warnings };
+    }
+
+    // 2. Find source conversation
+    const conversation = participantLookup[quote.participantId];
+    if (!conversation) {
+      errors.push(`No conversation found for participant ${quote.participantId}`);
+      return { errors, warnings };
+    }
+
+    // 3. Extract user responses only from conversation
+    const userText = this.extractUserResponsesOnly(conversation.cleanResponse);
+    if (!userText || userText.trim() === '') {
+      errors.push(`No user responses found in conversation for participant ${quote.participantId}`);
+      return { errors, warnings };
+    }
+
+    // 4. Verify quote exists verbatim in user responses
+    const verbatimCheck = this.validateQuoteExistsVerbatim(quote.quote, userText);
+    if (!verbatimCheck.isValid) {
+      errors.push(`HALLUCINATED QUOTE: "${quote.quote.substring(0, 50)}..." for participant ${quote.participantId} - ${verbatimCheck.reason}`);
+    }
+
+    // 5. Validate participant classification matches theme (optional warning)
+    const participantClassification = classifications?.find(c => c.participantId === quote.participantId);
+    if (participantClassification && participantClassification.themeId !== theme.id) {
+      warnings.push(`Quote from participant ${quote.participantId} for theme "${theme.title}" but participant classified to "${participantClassification.theme}"`);
+    }
+
+    // 6. Check quote length and quality
+    const qualityCheck = this.validateQuoteQuality(quote.quote);
+    warnings.push(...qualityCheck.warnings);
+
+    return { errors, warnings };
   }
 
   /**
-   * Core validation: Exact text matching with normalization
+   * Validate that quote exists verbatim in conversation user text
    * @param {string} quoteText - Quote to validate
-   * @param {string} conversationUserText - User text from conversation
-   * @returns {Object} Validation result with position and match details
+   * @param {string} conversationUserText - User responses from conversation
+   * @returns {Object} Validation result with isValid flag and reason
    */
   validateQuoteExistsVerbatim(quoteText, conversationUserText) {
-    // TODO: Implement core verbatim validation
     try {
       // Handle multi-part quotes (joined with ' ... ')
-      const quoteParts = quoteText.includes(' ... ') ? quoteText.split(' ... ') : [quoteText];
-      
-      const validationResults = quoteParts.map(part => this.validateQuotePart(part, conversationUserText));
-      
-      // All parts must be valid
-      const allValid = validationResults.every(result => result.isValid);
-      
-      if (!allValid) {
-        const invalidParts = validationResults
-          .filter(result => !result.isValid)
-          .map(result => `"${result.part}"`);
-        
-        return {
-          isValid: false,
-          details: `Quote parts not found: ${invalidParts.join(', ')}`
-        };
+      const quoteParts = quoteText.includes(this.config.multiPartSeparator) 
+        ? quoteText.split(this.config.multiPartSeparator)
+        : [quoteText];
+
+      // Validate each part of the quote
+      for (const part of quoteParts) {
+        const partValidation = this.validateQuotePart(part.trim(), conversationUserText);
+        if (!partValidation.isValid) {
+          return {
+            isValid: false,
+            reason: `Quote part "${part.substring(0, 30)}..." not found: ${partValidation.reason}`
+          };
+        }
       }
 
-      return {
-        isValid: true,
-        position: validationResults[0].position,
-        matchType: validationResults[0].matchType,
-        parts: validationResults.length
-      };
+      return { isValid: true, reason: 'Quote verified verbatim' };
 
     } catch (error) {
       return {
         isValid: false,
-        details: `Validation error: ${error.message}`
+        reason: `Validation error: ${error.message}`
       };
     }
   }
 
   /**
-   * Validate a single quote part
+   * Validate a single part of a quote
    * @param {string} quotePart - Part of quote to validate
-   * @param {string} conversationText - Full conversation text
-   * @returns {Object} Validation result for quote part
+   * @param {string} conversationText - Full user conversation text
+   * @returns {Object} Part validation result
    */
   validateQuotePart(quotePart, conversationText) {
-    // TODO: Implement quote part validation with different matching strategies
-    const part = quotePart.trim();
-    
-    if (part.length === 0) {
-      return { isValid: false, part, details: 'Empty quote part' };
+    if (!quotePart || quotePart.length === 0) {
+      return { isValid: false, reason: 'Empty quote part' };
     }
 
-    // Strategy 1: Exact match
-    if (conversationText.includes(part)) {
-      return {
-        isValid: true,
-        part,
-        position: conversationText.indexOf(part),
-        matchType: 'exact'
-      };
+    // Normalize both texts for comparison while preserving meaning
+    const normalizedQuote = this.normalizeText(quotePart);
+    const normalizedConversation = this.normalizeText(conversationText);
+
+    // Check if normalized quote exists in normalized conversation
+    const exists = normalizedConversation.includes(normalizedQuote);
+
+    if (!exists && this.config.enableDetailedLogging) {
+      console.log(`[QUOTE VALIDATOR] Quote part not found:`);
+      console.log(`  Quote: "${quotePart}"`);
+      console.log(`  Normalized: "${normalizedQuote}"`);
+      console.log(`  In conversation: "${conversationText.substring(0, 200)}..."`);
     }
 
-    // Strategy 2: Normalized match (if enabled)
-    if (this.config.normalizeWhitespace || this.config.ignorePunctuation || this.config.ignoreCase) {
-      const normalizedQuote = this.normalizeText(part);
-      const normalizedConversation = this.normalizeText(conversationText);
-      
-      if (normalizedConversation.includes(normalizedQuote)) {
-        return {
-          isValid: true,
-          part,
-          position: this.findNormalizedPosition(part, conversationText),
-          matchType: 'normalized'
-        };
-      }
-    }
-
-    // Log detailed failure information
-    console.error(`Quote verification failed for: "${part}"`);
-    console.error(`In conversation text (first 200 chars): "${conversationText.substring(0, 200)}..."`);
-    
     return {
-      isValid: false,
-      part,
-      details: `Text not found in conversation`
+      isValid: exists,
+      reason: exists ? 'Found verbatim' : 'Not found in conversation'
     };
   }
 
   /**
-   * Extract only user responses from conversation format
-   * @param {string} conversationText - Full conversation text
-   * @returns {string} Combined user responses only
-   */
-  extractUserResponsesOnly(conversationText) {
-    // TODO: Implement user response extraction
-    try {
-      // Parse "assistant: ... user: ... assistant: ... user: ..." format
-      const parts = conversationText.split(/(?:assistant:|user:)/i);
-      const userResponses = [];
-      
-      // Find text that follows 'user:' markers
-      let isUserTurn = false;
-      const markers = conversationText.match(/(?:assistant:|user:)/gi) || [];
-      
-      for (let i = 0; i < markers.length; i++) {
-        const marker = markers[i].toLowerCase();
-        if (marker === 'user:') {
-          isUserTurn = true;
-        } else if (marker === 'assistant:') {
-          isUserTurn = false;
-        }
-        
-        if (isUserTurn && i + 1 < parts.length) {
-          const userText = parts[i + 1].trim();
-          if (userText.length > 0) {
-            userResponses.push(userText);
-          }
-        }
-      }
-      
-      return userResponses.join(' ').trim();
-      
-    } catch (error) {
-      console.error('Failed to extract user responses:', error);
-      return conversationText; // Fallback to full text
-    }
-  }
-
-  /**
-   * Normalize text for comparison
+   * Normalize text for comparison while preserving semantic meaning
    * @param {string} text - Text to normalize
    * @returns {string} Normalized text
    */
   normalizeText(text) {
-    // TODO: Implement text normalization
-    let normalized = text;
-    
-    if (this.config.normalizeWhitespace) {
-      normalized = normalized.replace(/\s+/g, ' ').trim();
+    if (!text || typeof text !== 'string') {
+      return '';
     }
-    
-    if (this.config.ignoreCase) {
+
+    let normalized = text.trim();
+
+    // Convert to lowercase unless preserveCase is set
+    if (!this.config.preserveCase) {
       normalized = normalized.toLowerCase();
     }
-    
-    if (this.config.ignorePunctuation) {
+
+    // Remove punctuation unless preservePunctuation is set
+    if (!this.config.preservePunctuation) {
+      // Remove punctuation but preserve spaces and word boundaries
       normalized = normalized.replace(/[^\w\s]/g, '');
     }
-    
+
+    // Normalize whitespace
+    normalized = normalized.replace(/\s+/g, ' ').trim();
+
     return normalized;
   }
 
   /**
-   * Find position of normalized text in original
-   * @param {string} quotePart - Original quote part
-   * @param {string} conversationText - Original conversation
-   * @returns {number} Approximate position
+   * Extract user responses only from conversation format
+   * @param {string} conversationText - Full conversation text
+   * @returns {string} User responses only, joined with spaces
    */
-  findNormalizedPosition(quotePart, conversationText) {
-    // TODO: Implement approximate position finding
-    // This is complex - for now return -1 to indicate normalized match
-    return -1;
+  extractUserResponsesOnly(conversationText) {
+    if (!conversationText || typeof conversationText !== 'string') {
+      return '';
+    }
+
+    // Reuse the proven parsing logic from quote extractor
+    const parts = conversationText.split(/(?:assistant:|user:)/i);
+    const userParts = [];
+    
+    // Find parts that come after 'user:' markers
+    for (let i = 0; i < parts.length; i++) {
+      // Check if this part comes after a 'user:' marker
+      const beforeThis = conversationText.substring(0, 
+        conversationText.indexOf(parts[i])
+      ).toLowerCase();
+      
+      if (beforeThis.includes('user:') && !beforeThis.endsWith('assistant:')) {
+        const userPart = parts[i].trim();
+        if (userPart.length > 0) {
+          userParts.push(userPart);
+        }
+      }
+    }
+    
+    return userParts.join(' ');
   }
 
   /**
-   * Validate input structure for quote validation
+   * Validate quote quality and characteristics
+   * @param {string} quoteText - Quote to validate
+   * @returns {Object} Quality validation result
+   */
+  validateQuoteQuality(quoteText) {
+    const warnings = [];
+
+    // Check minimum length
+    const wordCount = quoteText.trim().split(/\s+/).length;
+    if (wordCount < this.config.minQuoteLength) {
+      warnings.push(`Quote is very short (${wordCount} words): "${quoteText}"`);
+    }
+
+    // Check for common quality issues
+    if (quoteText.length > 500) {
+      warnings.push(`Quote is very long (${quoteText.length} chars) - consider shorter excerpts`);
+    }
+
+    if (/^\s*[.]{3,}/.test(quoteText) || /[.]{3,}\s*$/.test(quoteText)) {
+      warnings.push(`Quote appears to be truncated with ellipsis: "${quoteText.substring(0, 50)}..."`);
+    }
+
+    return { warnings };
+  }
+
+  /**
+   * Perform additional validation checks
+   * @param {Object} selectedQuotes - All selected quotes
+   * @param {Array} themes - Themes array
+   * @param {Array} classifications - Classifications array
+   * @param {Object} participantLookup - Participant lookup
+   * @returns {Object} Additional validation results
+   */
+  performAdditionalValidation(selectedQuotes, themes, classifications, participantLookup) {
+    const errors = [];
+    const warnings = [];
+
+    // Check for duplicate quotes across themes
+    const allQuotes = [];
+    for (const [themeId, themeQuotes] of Object.entries(selectedQuotes)) {
+      for (const quote of themeQuotes) {
+        allQuotes.push({ ...quote, themeId });
+      }
+    }
+
+    // Check for exact duplicate quotes
+    const quotesMap = new Map();
+    for (const quote of allQuotes) {
+      const key = `${quote.participantId}:${quote.quote}`;
+      if (quotesMap.has(key)) {
+        warnings.push(`Duplicate quote found: "${quote.quote.substring(0, 50)}..." from participant ${quote.participantId}`);
+      } else {
+        quotesMap.set(key, quote);
+      }
+    }
+
+    // Check for themes with no quotes
+    for (const theme of themes) {
+      const themeQuotes = selectedQuotes[theme.id] || [];
+      if (themeQuotes.length === 0) {
+        warnings.push(`No quotes found for theme: "${theme.title}"`);
+      }
+    }
+
+    return { errors, warnings };
+  }
+
+  /**
+   * Create participant lookup for fast conversation access
+   * @param {Array} responses - Response array
+   * @returns {Object} Participant lookup object
+   */
+  createParticipantLookup(responses) {
+    const lookup = {};
+    for (const response of responses) {
+      lookup[response.participantId] = response;
+    }
+    return lookup;
+  }
+
+  /**
+   * Validate validation input structure
    * @param {Object} validationInput - Input to validate
-   * @throws {Error} If input structure is invalid
+   * @returns {Object} Input validation result
    */
-  validateInputStructure(validationInput) {
-    // TODO: Implement input structure validation
+  validateInput(validationInput) {
+    if (!validationInput || typeof validationInput !== 'object') {
+      return { error: 'Validation input is required and must be an object' };
+    }
+
     const { selectedQuotes, responses, themes, classifications } = validationInput;
-    
-    if (!selectedQuotes) {
-      throw new Error('selectedQuotes is required');
+
+    // Validate selectedQuotes
+    if (!selectedQuotes || typeof selectedQuotes !== 'object') {
+      return { error: 'selectedQuotes is required and must be an object' };
     }
-    
-    if (!Array.isArray(responses)) {
-      throw new Error('responses must be an array');
+
+    // Validate responses
+    if (!responses || !Array.isArray(responses) || responses.length === 0) {
+      return { error: 'responses array is required and must not be empty' };
     }
-    
-    if (!Array.isArray(themes)) {
-      throw new Error('themes must be an array');
+
+    // Validate themes
+    if (!themes || !Array.isArray(themes) || themes.length === 0) {
+      return { error: 'themes array is required and must not be empty' };
     }
-    
-    // Additional validation can be added here
+
+    // Classifications are optional but should be array if provided
+    if (classifications && !Array.isArray(classifications)) {
+      return { error: 'classifications must be an array if provided' };
+    }
+
+    return { valid: true };
   }
 
   /**
-   * Generate detailed validation report
-   * @param {Object} validationResult - Result from validateQuotes
-   * @returns {string} Human-readable validation report
+   * Count total quotes across all themes
+   * @param {Object} selectedQuotes - Quotes organized by theme
+   * @returns {number} Total quote count
    */
-  generateValidationReport(validationResult) {
-    // TODO: Implement validation report generation
-    const { passed, errors, warnings, validatedQuotes } = validationResult;
-    
-    let report = `\n=== Quote Validation Report ===\n`;
-    report += `Status: ${passed ? 'PASSED' : 'FAILED'}\n`;
-    report += `Errors: ${errors.length}\n`;
-    report += `Warnings: ${warnings.length}\n\n`;
-    
-    if (errors.length > 0) {
-      report += `Errors:\n`;
-      errors.forEach((error, index) => {
-        report += `${index + 1}. ${error}\n`;
-      });
-      report += '\n';
+  countTotalQuotes(selectedQuotes) {
+    return Object.values(selectedQuotes).reduce((total, themeQuotes) => {
+      return total + (Array.isArray(themeQuotes) ? themeQuotes.length : 0);
+    }, 0);
+  }
+
+  /**
+   * Get quote counts per theme
+   * @param {Object} selectedQuotes - Quotes organized by theme
+   * @returns {Object} Quote counts per theme
+   */
+  getThemeQuoteCounts(selectedQuotes) {
+    const counts = {};
+    for (const [themeId, themeQuotes] of Object.entries(selectedQuotes)) {
+      counts[themeId] = Array.isArray(themeQuotes) ? themeQuotes.length : 0;
     }
-    
-    if (warnings.length > 0) {
-      report += `Warnings:\n`;
-      warnings.forEach((warning, index) => {
-        report += `${index + 1}. ${warning}\n`;
-      });
-      report += '\n';
-    }
-    
-    report += `=== End Report ===\n`;
-    return report;
+    return counts;
   }
 }

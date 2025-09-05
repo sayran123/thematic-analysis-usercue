@@ -7,6 +7,7 @@
 
 import { loadPrompt, formatPrompt } from '../prompts/quote-extraction.js';
 import { initializeLLM } from '../../utils/config/llm-config.js';
+import { QuoteValidator } from '../../utils/validation/quote-validator.js';
 
 /**
  * Quote Extractor Agent class
@@ -15,6 +16,7 @@ export class QuoteExtractorAgent {
   constructor() {
     this.llm = null;
     this.prompt = null; // Will load from prompts/quote-extraction.js
+    this.quoteValidator = null; // Will initialize QuoteValidator
     this.maxRetries = 3;
   }
 
@@ -49,24 +51,78 @@ export class QuoteExtractorAgent {
         this.prompt = promptResult.template;
       }
 
-      const { themes, classifications, responses, derivedQuestion, projectBackground } = input;
-      
-      // For initial implementation, we'll extract quotes without full validation
-      // (Milestone 2.5 will add comprehensive validation)
-      const quotesResult = await this.extractQuotes(input);
-      
-      if (quotesResult.error) {
-        return quotesResult;
+      // Initialize quote validator if needed
+      if (!this.quoteValidator) {
+        this.quoteValidator = new QuoteValidator({
+          enableDetailedLogging: true // Enable detailed logging for debugging
+        });
       }
 
-      // Add basic validation (full validation in Milestone 2.5)
-      const validatedQuotes = this.addBasicValidation(quotesResult.quotes, responses);
+      const { themes, classifications, responses, derivedQuestion, projectBackground } = input;
       
-      return {
-        quotes: validatedQuotes,
-        totalQuotesExtracted: this.countQuotes(validatedQuotes),
-        themeQuoteCounts: this.getThemeQuoteCounts(validatedQuotes)
-      };
+      // Attempt quote extraction with validation retry logic
+      for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+        console.log(`[QUOTE EXTRACTOR] Attempt ${attempt}/${this.maxRetries}`);
+        
+        // Extract quotes using LLM
+        const quotesResult = await this.extractQuotes(input);
+        
+        if (quotesResult.error) {
+          console.warn(`[QUOTE EXTRACTOR] Extraction failed on attempt ${attempt}: ${quotesResult.error}`);
+          if (attempt === this.maxRetries) {
+            return quotesResult;
+          }
+          continue;
+        }
+
+        // Validate extracted quotes for hallucination
+        console.log('[QUOTE EXTRACTOR] Validating extracted quotes...');
+        const validationResult = await this.validateQuotes(quotesResult.quotes, input);
+        
+        if (validationResult.passed) {
+          console.log(`[QUOTE EXTRACTOR] Validation passed on attempt ${attempt}`);
+          
+          // Add validation metadata to quotes
+          const validatedQuotes = this.addValidationMetadata(quotesResult.quotes, validationResult);
+          
+          return {
+            quotes: validatedQuotes,
+            totalQuotesExtracted: this.countQuotes(validatedQuotes),
+            themeQuoteCounts: this.getThemeQuoteCounts(validatedQuotes),
+            validationResult: {
+              passed: true,
+              attempts: attempt,
+              totalQuotesValidated: validationResult.totalQuotesValidated,
+              errors: validationResult.errors,
+              warnings: validationResult.warnings
+            }
+          };
+        } else {
+          console.warn(`[QUOTE EXTRACTOR] Validation failed on attempt ${attempt}:`, validationResult.errors.slice(0, 3));
+          
+          if (attempt === this.maxRetries) {
+            // Return quotes with validation warnings on final attempt
+            console.warn('[QUOTE EXTRACTOR] Max retries reached, returning quotes with validation warnings');
+            const quotesWithWarnings = this.addValidationMetadata(quotesResult.quotes, validationResult);
+            
+            return {
+              quotes: quotesWithWarnings,
+              totalQuotesExtracted: this.countQuotes(quotesWithWarnings),
+              themeQuoteCounts: this.getThemeQuoteCounts(quotesWithWarnings),
+              validationResult: {
+                passed: false,
+                attempts: attempt,
+                totalQuotesValidated: validationResult.totalQuotesValidated,
+                errors: validationResult.errors,
+                warnings: validationResult.warnings
+              }
+            };
+          } else {
+            // Add validation errors to input for retry prompt
+            input.previousErrors = validationResult.errors.slice(0, 5); // Limit to 5 most important errors
+          }
+        }
+      }
 
     } catch (error) {
       return { error: `Quote extraction failed: ${error.message}` };
@@ -80,10 +136,25 @@ export class QuoteExtractorAgent {
    */
   async extractQuotes(input) {
     try {
+      // Determine which prompt to use based on whether this is a retry
+      const promptType = input.previousErrors && input.previousErrors.length > 0 
+        ? 'quote-extraction-retry' 
+        : 'quote-extraction';
+      
+      // Load appropriate prompt if this is a retry
+      if (promptType === 'quote-extraction-retry') {
+        const retryPromptResult = loadPrompt('quote-extraction-retry');
+        if (retryPromptResult.error) {
+          console.warn('[QUOTE EXTRACTOR] Failed to load retry prompt, using standard prompt');
+        } else {
+          this.prompt = retryPromptResult.template;
+        }
+      }
+      
       // Format prompt with input data
       const formattedPrompt = formatPrompt(this.prompt, input);
       
-      console.log('[QUOTE EXTRACTOR] Calling LLM for quote extraction...');
+      console.log(`[QUOTE EXTRACTOR] Calling LLM for quote extraction (${promptType})...`);
       const startTime = Date.now();
       
       // Call LLM API
@@ -110,21 +181,48 @@ export class QuoteExtractorAgent {
   }
 
   /**
-   * Add basic validation to quotes (full validation in Milestone 2.5)
+   * Validate extracted quotes using QuoteValidator
    * @param {Object} quotes - Extracted quotes organized by theme
-   * @param {Array} responses - Original responses for validation
-   * @returns {Object} Quotes with basic validation status
+   * @param {Object} input - Original input data with themes, classifications, responses
+   * @returns {Promise<Object>} Validation result
    */
-  addBasicValidation(quotes, responses) {
-    // For now, just add a placeholder validation status
-    // Milestone 2.5 will implement comprehensive quote validation
+  async validateQuotes(quotes, input) {
+    try {
+      const validationInput = {
+        selectedQuotes: quotes,
+        responses: input.responses,
+        themes: input.themes,
+        classifications: input.classifications
+      };
+      
+      const validationResult = this.quoteValidator.validateQuotes(validationInput);
+      return validationResult;
+      
+    } catch (error) {
+      console.error('[QUOTE EXTRACTOR] Quote validation error:', error);
+      return {
+        passed: false,
+        errors: [`Quote validation failed: ${error.message}`],
+        warnings: []
+      };
+    }
+  }
+
+  /**
+   * Add validation metadata to quotes
+   * @param {Object} quotes - Extracted quotes organized by theme
+   * @param {Object} validationResult - Validation result from QuoteValidator
+   * @returns {Object} Quotes with validation metadata
+   */
+  addValidationMetadata(quotes, validationResult) {
     const validatedQuotes = {};
     
     for (const [themeId, themeQuotes] of Object.entries(quotes)) {
       validatedQuotes[themeId] = themeQuotes.map(quote => ({
         ...quote,
-        verified: true, // Placeholder - real validation in Milestone 2.5
-        validationMethod: 'basic' // Indicates this is basic validation
+        verified: validationResult.passed, // True if all validation passed
+        validationMethod: 'comprehensive', // Indicates comprehensive validation used
+        validationStatus: validationResult.passed ? 'verified' : 'warning'
       }));
     }
     

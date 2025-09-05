@@ -375,13 +375,26 @@ export class QuestionAnalysisWorkflow {
 
       console.log(`[WORKFLOW] Quote extraction completed: ${quoteResult.totalQuotesExtracted} quotes extracted`);
       
+      // Log validation results if available
+      if (quoteResult.validationResult) {
+        const validation = quoteResult.validationResult;
+        console.log(`[WORKFLOW] Quote validation: ${validation.passed ? 'PASSED' : 'FAILED'} (${validation.attempts} attempts)`);
+        if (validation.errors.length > 0) {
+          console.log(`[WORKFLOW] Validation errors: ${validation.errors.length}`);
+        }
+        if (validation.warnings.length > 0) {
+          console.log(`[WORKFLOW] Validation warnings: ${validation.warnings.length}`);
+        }
+      }
+      
       return {
         ...state,
         quotes: quoteResult.quotes,
         quoteExtractionStats: {
           totalQuotes: quoteResult.totalQuotesExtracted,
           quotesPerTheme: quoteResult.themeQuoteCounts
-        }
+        },
+        quoteValidationResult: quoteResult.validationResult
       };
 
     } catch (error) {

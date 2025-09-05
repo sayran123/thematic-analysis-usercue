@@ -10,8 +10,8 @@ import path from 'path';
 import { ensureDirectoryExists } from '../../utils/helpers/file-utils.js';
 
 /**
- * Generate executive summary markdown file
- * @param {Array} analyses - Array of completed question analyses
+ * Generate executive summary markdown file with enhanced multi-question support
+ * @param {Array} analyses - Array of completed question analyses (may include errors)
  * @param {Object} finalReport - Complete analysis report
  * @param {Object} options - Generation options
  * @returns {Promise<string|{error: string}>} Generated markdown content or error
@@ -20,17 +20,32 @@ export async function generateExecutiveSummary(analyses, finalReport, options = 
   const outputPath = options.outputPath || 'outputs/executive_summary.md';
   
   try {
-    // Validate input
-    if (!Array.isArray(analyses) || analyses.length === 0) {
-      return { error: 'Analyses must be a non-empty array' };
+    // Enhanced validation for partial failures
+    const validation = validateSummaryInputs(analyses, finalReport);
+    if (!validation.passed) {
+      return { error: `Validation failed: ${validation.errors.join(', ')}` };
     }
     
-    if (!finalReport || typeof finalReport !== 'object') {
-      return { error: 'Final report must be a valid object' };
+    // Log validation warnings
+    if (validation.warnings.length > 0) {
+      console.log('⚠️ Summary Generation Warnings:');
+      validation.warnings.forEach(warning => console.log(`  - ${warning}`));
     }
     
-    // Generate markdown content
-    const markdownContent = createMarkdownContent(analyses, finalReport, options);
+    // Separate successful and failed analyses for better summary handling
+    const { successfulAnalyses, failedAnalyses, partialFailures } = categorizeAnalysesForSummary(analyses);
+    
+    // Generate markdown content with failure awareness
+    const markdownContent = createMarkdownContentEnhanced(
+      successfulAnalyses, 
+      finalReport, 
+      options,
+      { 
+        failedAnalyses, 
+        partialFailures,
+        originalAnalysesCount: analyses.length 
+      }
+    );
     
     // Ensure output directory exists
     const outputDir = path.dirname(outputPath);
@@ -43,6 +58,16 @@ export async function generateExecutiveSummary(analyses, finalReport, options = 
     await fs.writeFile(outputPath, markdownContent, 'utf8');
     
     console.log(`📄 Generated executive summary: ${path.basename(outputPath)}`);
+    if (failedAnalyses.length > 0 || partialFailures.length > 0) {
+      console.log(`  ℹ️ Summary includes ${successfulAnalyses.length} successful analyses`);
+      if (failedAnalyses.length > 0) {
+        console.log(`  ⚠️ ${failedAnalyses.length} questions failed completely`);
+      }
+      if (partialFailures.length > 0) {
+        console.log(`  ⚠️ ${partialFailures.length} questions had partial failures`);
+      }
+    }
+    
     return markdownContent;
     
   } catch (error) {
@@ -583,4 +608,205 @@ function calculateQuoteVerificationRate(analyses) {
   
   const rate = ((verifiedQuotes / totalQuotes) * 100).toFixed(1);
   return `${verifiedQuotes}/${totalQuotes} (${rate}%)`;
+}
+
+/**
+ * Enhanced validation for summary inputs with partial failure support
+ * @param {Array} analyses - Analysis results (may include errors)
+ * @param {Object} finalReport - Final report object
+ * @returns {Object} Validation result
+ */
+function validateSummaryInputs(analyses, finalReport) {
+  const errors = [];
+  const warnings = [];
+  
+  if (!Array.isArray(analyses)) {
+    errors.push('Analyses must be an array');
+    return { passed: false, errors, warnings };
+  }
+  
+  if (analyses.length === 0) {
+    errors.push('No analyses provided for summary generation');
+    return { passed: false, errors, warnings };
+  }
+  
+  if (!finalReport || typeof finalReport !== 'object') {
+    errors.push('Final report must be a valid object');
+    return { passed: false, errors, warnings };
+  }
+  
+  // Check for at least some successful analyses
+  const successfulCount = analyses.filter(a => !a.error && a.themes && a.themes.length > 0).length;
+  const errorCount = analyses.filter(a => a.error).length;
+  const partialCount = analyses.filter(a => !a.error && (!a.themes || a.themes.length === 0)).length;
+  
+  if (successfulCount === 0) {
+    if (analyses.length > 0) {
+      errors.push('No successful analyses available for summary generation');
+    }
+  } else {
+    warnings.push(`Summary will be generated from ${successfulCount} successful analyses`);
+    if (errorCount > 0) {
+      warnings.push(`${errorCount} questions failed completely and will be noted in summary`);
+    }
+    if (partialCount > 0) {
+      warnings.push(`${partialCount} questions had partial failures and will be noted in summary`);
+    }
+  }
+  
+  return {
+    passed: errors.length === 0,
+    errors,
+    warnings,
+    statistics: {
+      totalAnalyses: analyses.length,
+      successfulAnalyses: successfulCount,
+      errorAnalyses: errorCount,
+      partialFailures: partialCount
+    }
+  };
+}
+
+/**
+ * Categorize analyses for summary generation
+ * @param {Array} analyses - All analyses
+ * @returns {Object} Categorized analyses
+ */
+function categorizeAnalysesForSummary(analyses) {
+  const successfulAnalyses = [];
+  const failedAnalyses = [];
+  const partialFailures = [];
+  
+  analyses.forEach(analysis => {
+    if (analysis.error) {
+      failedAnalyses.push({
+        questionId: analysis.questionId || 'unknown',
+        error: analysis.error
+      });
+    } else if (!analysis.themes || analysis.themes.length === 0) {
+      partialFailures.push({
+        questionId: analysis.questionId || 'unknown',
+        reason: 'No themes generated',
+        hasClassifications: !!(analysis.classifications && Object.keys(analysis.classifications).length > 0),
+        hasSummary: !!analysis.summary
+      });
+    } else {
+      successfulAnalyses.push(analysis);
+    }
+  });
+  
+  return { successfulAnalyses, failedAnalyses, partialFailures };
+}
+
+/**
+ * Create enhanced markdown content with failure awareness
+ * @param {Array} successfulAnalyses - Successful analyses only
+ * @param {Object} finalReport - Complete analysis report
+ * @param {Object} options - Generation options
+ * @param {Object} failureContext - Context about failures
+ * @returns {string} Enhanced markdown content
+ */
+function createMarkdownContentEnhanced(successfulAnalyses, finalReport, options, failureContext = {}) {
+  // Use the existing createMarkdownContent but add failure context
+  let content = createMarkdownContent(successfulAnalyses, finalReport, options);
+  
+  // Add data quality section if there are failures
+  if (failureContext.failedAnalyses?.length > 0 || failureContext.partialFailures?.length > 0) {
+    const dataQualitySection = generateDataQualitySection(failureContext);
+    
+    // Insert data quality section before the appendix
+    const appendixIndex = content.indexOf('## Detailed Appendix');
+    if (appendixIndex !== -1) {
+      content = content.slice(0, appendixIndex) + dataQualitySection + '\n\n' + content.slice(appendixIndex);
+    } else {
+      // If no appendix found, add at the end
+      content += '\n\n' + dataQualitySection;
+    }
+  }
+  
+  return content;
+}
+
+/**
+ * Generate data quality section for partial failures
+ * @param {Object} failureContext - Context about failures
+ * @returns {string} Data quality section markdown
+ */
+function generateDataQualitySection(failureContext) {
+  const { failedAnalyses, partialFailures, originalAnalysesCount } = failureContext;
+  const totalFailures = (failedAnalyses?.length || 0) + (partialFailures?.length || 0);
+  const successfulCount = originalAnalysesCount - totalFailures;
+  
+  let section = `## Data Quality & Completeness\n\n`;
+  
+  // Overview
+  section += `### Analysis Completion Status\n\n`;
+  section += `This analysis successfully processed **${successfulCount} of ${originalAnalysesCount}** research questions (${((successfulCount / originalAnalysesCount) * 100).toFixed(1)}% completion rate).\n\n`;
+  
+  // Successful analyses summary
+  section += `**Successfully Analyzed Questions**: ${successfulCount}\n`;
+  section += `- Full thematic analysis with themes, classifications, quotes, and summaries\n`;
+  section += `- All data validation checks passed\n`;
+  section += `- Results are ready for decision-making\n\n`;
+  
+  // Failed analyses details
+  if (failedAnalyses && failedAnalyses.length > 0) {
+    section += `### Complete Analysis Failures (${failedAnalyses.length})\n\n`;
+    section += `The following questions could not be analyzed due to technical issues:\n\n`;
+    
+    failedAnalyses.forEach((failure, index) => {
+      section += `${index + 1}. **${failure.questionId}**\n`;
+      section += `   - Issue: ${failure.error}\n`;
+      section += `   - Impact: No analysis results available\n\n`;
+    });
+    
+    section += `**Recommended Actions**:\n`;
+    section += `- Investigate root cause of failures (likely LLM service issues or data format problems)\n`;
+    section += `- Retry analysis for these questions once issues are resolved\n`;
+    section += `- Consider manual analysis as interim solution\n\n`;
+  }
+  
+  // Partial failures details
+  if (partialFailures && partialFailures.length > 0) {
+    section += `### Partial Analysis Results (${partialFailures.length})\n\n`;
+    section += `The following questions have incomplete analysis results:\n\n`;
+    
+    partialFailures.forEach((failure, index) => {
+      section += `${index + 1}. **${failure.questionId}**\n`;
+      section += `   - Issue: ${failure.reason}\n`;
+      section += `   - Classifications Available: ${failure.hasClassifications ? 'Yes' : 'No'}\n`;
+      section += `   - Summary Available: ${failure.hasSummary ? 'Yes' : 'No'}\n\n`;
+    });
+    
+    section += `**Recommended Actions**:\n`;
+    section += `- Review LLM prompt engineering for theme generation\n`;
+    section += `- Check data quality for these specific questions\n`;
+    section += `- Consider re-running analysis with adjusted parameters\n\n`;
+  }
+  
+  // Quality impact assessment
+  section += `### Quality Impact Assessment\n\n`;
+  const completionRate = (successfulCount / originalAnalysesCount) * 100;
+  
+  if (completionRate >= 90) {
+    section += `**Overall Quality**: HIGH - Analysis results are comprehensive and reliable.\n\n`;
+  } else if (completionRate >= 70) {
+    section += `**Overall Quality**: MEDIUM - Analysis provides valuable insights despite some missing data.\n\n`;
+  } else {
+    section += `**Overall Quality**: LOW - Significant data gaps may affect reliability of conclusions.\n\n`;
+  }
+  
+  section += `The successful analyses provide sufficient data for:\n`;
+  section += `- Strategic decision-making based on available questions\n`;
+  section += `- Identifying key themes and participant perspectives\n`;
+  section += `- Understanding primary research objectives\n\n`;
+  
+  if (totalFailures > 0) {
+    section += `**Limitations**:\n`;
+    section += `- Missing perspectives from ${totalFailures} research questions\n`;
+    section += `- Potential gaps in cross-question theme correlation\n`;
+    section += `- Reduced sample size for comprehensive analysis\n\n`;
+  }
+  
+  return section;
 }

@@ -11,8 +11,8 @@ import path from 'path';
 import { ensureDirectoryExists } from '../../utils/helpers/file-utils.js';
 
 /**
- * Generate classification Excel files for all questions
- * @param {Array} analyses - Array of completed question analyses
+ * Generate classification Excel files for all questions with enhanced multi-question support
+ * @param {Array} analyses - Array of completed question analyses (may include errors)
  * @param {Object} originalData - Original response data for reference
  * @param {Object} options - Generation options
  * @returns {Promise<Array|{error: string}>} Array of generated file paths or error
@@ -21,10 +21,16 @@ export async function generateClassificationFiles(analyses, originalData, option
   const outputDir = options.outputDir || 'outputs';
   
   try {
-    // Validate input data
-    const validation = validateDataForExcel(analyses, originalData);
-    if (!validation.passed) {
+    // Enhanced validation for multi-question support
+    const validation = validateDataForExcelEnhanced(analyses, originalData);
+    if (!validation.passed && validation.errors.length > 0) {
       return { error: `Validation failed: ${validation.errors.join(', ')}` };
+    }
+
+    // Log validation warnings if any
+    if (validation.warnings.length > 0) {
+      console.log('⚠️ Excel Generation Warnings:');
+      validation.warnings.forEach(warning => console.log(`  - ${warning}`));
     }
 
     // Ensure output directory exists
@@ -34,22 +40,59 @@ export async function generateClassificationFiles(analyses, originalData, option
     }
 
     const generatedFiles = [];
+    const skippedQuestions = [];
+    const partiallyGeneratedFiles = [];
     
     for (const analysis of analyses) {
-      // Skip questions without classifications
+      // Handle complete failures
+      if (analysis.error) {
+        skippedQuestions.push({
+          questionId: analysis.questionId || 'unknown',
+          reason: 'Complete analysis failure',
+          error: analysis.error
+        });
+        continue;
+      }
+
+      // Handle questions without classifications or with partial failures
       if (!analysis.classifications || Object.keys(analysis.classifications).length === 0) {
-        console.warn(`⚠️ Skipping Excel generation for ${analysis.questionId} - no classifications available`);
+        skippedQuestions.push({
+          questionId: analysis.questionId,
+          reason: 'No classifications available',
+          note: 'Classification step may have failed'
+        });
         continue;
       }
       
-      const result = await generateSingleClassificationFile(analysis, originalData, outputDir);
+      const result = await generateSingleClassificationFileEnhanced(analysis, originalData, outputDir);
       if (result.error) {
-        return { error: `Failed to generate file for ${analysis.questionId}: ${result.error}` };
+        skippedQuestions.push({
+          questionId: analysis.questionId,
+          reason: 'Excel generation failed',
+          error: result.error
+        });
+        continue;
       }
-      generatedFiles.push(result);
+      
+      if (result.hasPartialData) {
+        partiallyGeneratedFiles.push(result.filePath);
+      }
+      
+      generatedFiles.push(result.filePath);
     }
     
+    // Log comprehensive summary
     console.log(`✅ Generated ${generatedFiles.length} Excel classification files`);
+    if (skippedQuestions.length > 0) {
+      console.log(`⚠️ Skipped ${skippedQuestions.length} questions:`);
+      skippedQuestions.forEach(skip => {
+        console.log(`  - ${skip.questionId}: ${skip.reason}`);
+      });
+    }
+    if (partiallyGeneratedFiles.length > 0) {
+      console.log(`ℹ️ ${partiallyGeneratedFiles.length} files generated with partial data`);
+    }
+    
     return generatedFiles;
     
   } catch (error) {
@@ -520,4 +563,137 @@ export function validateDataForExcel(analyses, originalData) {
     errors,
     warnings
   };
+}
+
+/**
+ * Enhanced validation for multi-question support with partial failures
+ * @param {Array} analyses - Analysis results to validate (may include errors)
+ * @param {Object} originalData - Original response data
+ * @returns {Object} Enhanced validation result
+ */
+function validateDataForExcelEnhanced(analyses, originalData) {
+  const errors = [];
+  const warnings = [];
+  
+  if (!Array.isArray(analyses)) {
+    errors.push('Analyses must be an array');
+    return { passed: false, errors, warnings };
+  }
+  
+  if (!originalData || !originalData.responsesByQuestion) {
+    errors.push('Original response data is required for Excel generation');
+    return { passed: false, errors, warnings };
+  }
+  
+  let validAnalysesCount = 0;
+  let errorAnalysesCount = 0;
+  let partialFailuresCount = 0;
+  
+  analyses.forEach((analysis, index) => {
+    if (analysis.error) {
+      errorAnalysesCount++;
+      warnings.push(`Analysis ${index + 1} (${analysis.questionId || 'unknown'}) has complete failure: ${analysis.error}`);
+    } else if (!analysis.classifications || Object.keys(analysis.classifications).length === 0) {
+      partialFailuresCount++;
+      warnings.push(`Analysis ${index + 1} (${analysis.questionId || 'unknown'}) missing classifications - will be skipped`);
+    } else {
+      validAnalysesCount++;
+      
+      // Validate structure for analyses that will be processed
+      if (!analysis.questionId) {
+        warnings.push(`Analysis ${index + 1} missing questionId - will use fallback`);
+      }
+      if (!analysis.themes || analysis.themes.length === 0) {
+        warnings.push(`Analysis ${index + 1} (${analysis.questionId}) missing themes - Excel will show basic classification only`);
+      }
+    }
+  });
+  
+  // Check if we have at least one valid analysis
+  if (validAnalysesCount === 0) {
+    if (analyses.length > 0) {
+      warnings.push('No valid analyses available for Excel generation - all questions failed or have no classifications');
+    } else {
+      errors.push('No analyses provided');
+    }
+  } else {
+    warnings.push(`Excel generation will process ${validAnalysesCount} of ${analyses.length} questions`);
+    if (errorAnalysesCount > 0) {
+      warnings.push(`${errorAnalysesCount} questions failed completely and will be skipped`);
+    }
+    if (partialFailuresCount > 0) {
+      warnings.push(`${partialFailuresCount} questions have no classifications and will be skipped`);
+    }
+  }
+  
+  return {
+    passed: errors.length === 0,
+    errors,
+    warnings,
+    statistics: {
+      totalAnalyses: analyses.length,
+      validAnalyses: validAnalysesCount,
+      errorAnalyses: errorAnalysesCount,
+      partialFailures: partialFailuresCount
+    }
+  };
+}
+
+/**
+ * Enhanced single file generation with partial failure support
+ * @param {Object} analysis - Single question analysis result
+ * @param {Object} originalData - Original response data
+ * @param {string} outputDir - Output directory path
+ * @returns {Promise<Object>} Generation result with metadata
+ */
+async function generateSingleClassificationFileEnhanced(analysis, originalData, outputDir) {
+  try {
+    // Call the existing generation function
+    const result = await generateSingleClassificationFile(analysis, originalData, outputDir);
+    
+    if (result.error) {
+      return { error: result.error };
+    }
+    
+    // Check for partial data indicators
+    const hasPartialData = checkForPartialData(analysis);
+    
+    return {
+      filePath: result,
+      questionId: analysis.questionId,
+      hasPartialData,
+      classificationCount: analysis.classifications ? Object.keys(analysis.classifications).length : 0,
+      themeCount: analysis.themes ? analysis.themes.length : 0
+    };
+    
+  } catch (error) {
+    return { error: `Enhanced generation failed: ${error.message}` };
+  }
+}
+
+/**
+ * Check if analysis has partial data that affects Excel quality
+ * @param {Object} analysis - Analysis to check
+ * @returns {boolean} True if partial data detected
+ */
+function checkForPartialData(analysis) {
+  // Check for missing or incomplete data
+  if (!analysis.themes || analysis.themes.length === 0) {
+    return true;
+  }
+  
+  if (!analysis.summary) {
+    return true;
+  }
+  
+  if (analysis.partialFailures && analysis.partialFailures.length > 0) {
+    return true;
+  }
+  
+  // Check for themes without quotes (might indicate quote extraction failure)
+  if (analysis.themes.some(theme => !theme.supportingQuotes || theme.supportingQuotes.length === 0)) {
+    return true;
+  }
+  
+  return false;
 }

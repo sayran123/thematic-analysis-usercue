@@ -12,6 +12,7 @@ import { ParallelOrchestrator } from './analysis/workflows/parallel-orchestrator
 import { generateMainResults } from './outputs/generators/json-generator.js';
 import { generateClassificationFiles } from './outputs/generators/excel-generator.js';
 import { generateExecutiveSummary } from './outputs/generators/summary-generator.js';
+import { analyzeAndReportErrors } from './utils/validation/error-analyzer.js';
 import { initializeLLM, logOperation } from './utils/config/llm-config.js';
 import { validateConfig } from './utils/config/constants.js';
 import { ensureDirectoryExists } from './utils/helpers/file-utils.js';
@@ -59,20 +60,23 @@ export class ThematicAnalysisPipeline {
         return { error: `Data extraction failed: ${cleanedData.error}` };
       }
       
-      // Phase 3: Thematic analysis (currently single question, parallelization in Phase 4)
-      const analysisResults = await this.runThematicAnalysis(cleanedData);
+      // Phase 3: Thematic analysis with enhanced error handling
+      const analysisResults = await this.runThematicAnalysisEnhanced(cleanedData);
       if (analysisResults.error) {
         return { error: `Analysis failed: ${analysisResults.error}` };
       }
       
-      // Phase 4: Generate outputs
-      const outputFiles = await this.generateOutputs(analysisResults, cleanedData);
+      // Phase 3.5: Quality assurance and error analysis
+      const qualityAssurance = this.performQualityAssurance(analysisResults, cleanedData);
+      
+      // Phase 4: Generate outputs with enhanced multi-question support
+      const outputFiles = await this.generateOutputsEnhanced(analysisResults, cleanedData, qualityAssurance);
       if (outputFiles.error) {
         return { error: `Output generation failed: ${outputFiles.error}` };
       }
       
-      // Phase 5: Finalize and report
-      const summary = this.finalizePipeline(analysisResults, outputFiles);
+      // Phase 5: Finalize and report with comprehensive analysis
+      const summary = this.finalizePipelineEnhanced(analysisResults, outputFiles, qualityAssurance);
       
       console.log('✅ Thematic Analysis Pipeline completed successfully!');
       logOperation('pipeline-completed', { 
@@ -181,11 +185,11 @@ export class ThematicAnalysisPipeline {
   }
 
   /**
-   * Run parallel thematic analysis
+   * Run enhanced parallel thematic analysis with comprehensive error handling
    * @param {Object} cleanedData - Cleaned and parsed data
-   * @returns {Promise<Array>} Analysis results for all questions
+   * @returns {Promise<Array>} Analysis results for all questions (may include errors)
    */
-  async runThematicAnalysis(cleanedData) {
+  async runThematicAnalysisEnhanced(cleanedData) {
     console.log('🧠 Running thematic analysis...');
     
     try {
@@ -197,14 +201,26 @@ export class ThematicAnalysisPipeline {
       // Run all questions concurrently (Phase 4 parallel processing)
       const analysisResults = await parallelOrchestrator.parallelThematicAnalysis(cleanedData);
       
-      // Handle errors from parallel processing
+      // Enhanced error handling - accept partial results
       if (analysisResults.error) {
         return { error: `Parallel analysis failed: ${analysisResults.error}` };
       }
       
-      // Validate we got results
-      if (!Array.isArray(analysisResults) || analysisResults.length === 0) {
-        return { error: 'No analysis results returned from parallel processing' };
+      // Validate we got results (allow for partial results)
+      if (!Array.isArray(analysisResults)) {
+        return { error: 'Invalid analysis results format from parallel processing' };
+      }
+      
+      // Check if we have at least some usable results
+      const usableResults = analysisResults.filter(result => !result.error);
+      if (usableResults.length === 0) {
+        return { error: 'No usable analysis results - all questions failed' };
+      }
+      
+      // Log about any failures
+      const failedResults = analysisResults.filter(result => result.error);
+      if (failedResults.length > 0) {
+        console.warn(`⚠️ ${failedResults.length} questions failed but continuing with ${usableResults.length} successful analyses`);
       }
       
       console.log('✅ Parallel thematic analysis completed');
@@ -232,12 +248,13 @@ export class ThematicAnalysisPipeline {
   }
 
   /**
-   * Generate all output files
-   * @param {Array} analysisResults - Analysis results
+   * Generate all output files with enhanced multi-question support
+   * @param {Array} analysisResults - Analysis results (may include errors)
    * @param {Object} cleanedData - Original cleaned data
+   * @param {Object} qualityAssurance - Quality assurance data
    * @returns {Promise<Object>} Generated output file information
    */
-  async generateOutputs(analysisResults, cleanedData) {
+  async generateOutputsEnhanced(analysisResults, cleanedData, qualityAssurance) {
     console.log('📄 Generating output files...');
     
     try {
@@ -248,11 +265,14 @@ export class ThematicAnalysisPipeline {
         totalFiles: 0
       };
       
-      // Generate main JSON results
-      console.log('- Generating main results JSON...');
+      // Generate main JSON results with enhanced metadata
+      console.log('- Generating main results JSON with enhanced multi-question support...');
       const finalReport = await generateMainResults(analysisResults, {
         outputPath: `${this.options.outputDir}/thematic_analysis_results.json`,
-        startTime: this.startTime
+        startTime: this.startTime,
+        inputExcelPath: this.options.inputExcelPath,
+        backgroundPath: this.options.backgroundPath,
+        qualityAssurance
       });
       
       if (finalReport.error) {
@@ -262,8 +282,8 @@ export class ThematicAnalysisPipeline {
       outputFiles.mainResults = 'thematic_analysis_results.json';
       outputFiles.totalFiles++;
       
-      // Generate classification Excel files
-      console.log('- Generating classification Excel files...');
+      // Generate classification Excel files with enhanced error handling
+      console.log('- Generating classification Excel files with partial failure support...');
       const classificationFiles = await generateClassificationFiles(
         analysisResults,
         cleanedData,
@@ -279,10 +299,11 @@ export class ThematicAnalysisPipeline {
       );
       outputFiles.totalFiles += classificationFiles.length;
       
-      // Generate executive summary
-      console.log('- Generating executive summary...');
+      // Generate executive summary with failure awareness
+      console.log('- Generating executive summary with data quality assessment...');
       const summaryResult = await generateExecutiveSummary(analysisResults, finalReport, {
-        outputPath: `${this.options.outputDir}/executive_summary.md`
+        outputPath: `${this.options.outputDir}/executive_summary.md`,
+        qualityAssurance
       });
       
       if (summaryResult.error) {
@@ -462,6 +483,354 @@ export class ThematicAnalysisPipeline {
       const hours = Math.floor(durationSeconds / 3600);
       const minutes = Math.floor((durationSeconds % 3600) / 60);
       return `${hours}h ${minutes}m`;
+    }
+  }
+
+  /**
+   * Perform quality assurance checks on analysis results
+   * @param {Array} analysisResults - Analysis results (may include errors)
+   * @param {Object} cleanedData - Original cleaned data
+   * @returns {Object} Quality assurance report
+   */
+  performQualityAssurance(analysisResults, cleanedData) {
+    console.log('🔍 Performing quality assurance checks...');
+    
+    try {
+      // Perform comprehensive error analysis
+      const errorAnalysis = analyzeAndReportErrors(analysisResults, {
+        context: 'main_pipeline_qa',
+        originalQuestionCount: cleanedData.questions.length,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Calculate data completeness metrics
+      const completeness = this.calculateDataCompleteness(analysisResults, cleanedData);
+      
+      // Assess pipeline health
+      const healthAssessment = this.assessPipelineHealth(analysisResults);
+      
+      // Generate quality recommendations
+      const recommendations = this.generateQualityRecommendations(analysisResults, errorAnalysis);
+      
+      const qualityReport = {
+        timestamp: new Date().toISOString(),
+        errorAnalysis: errorAnalysis.error ? null : errorAnalysis,
+        dataCompleteness: completeness,
+        pipelineHealth: healthAssessment,
+        recommendations,
+        overallQuality: this.calculateOverallQuality(completeness, healthAssessment)
+      };
+      
+      // Log quality summary
+      console.log(`📊 Quality Assessment: ${qualityReport.overallQuality.level} (${qualityReport.dataCompleteness.completionRate}% complete)`);
+      if (qualityReport.recommendations.length > 0) {
+        console.log(`💡 ${qualityReport.recommendations.length} quality recommendations generated`);
+      }
+      
+      logOperation('pipeline-quality-assurance', {
+        qualityLevel: qualityReport.overallQuality.level,
+        completionRate: qualityReport.dataCompleteness.completionRate,
+        recommendationCount: qualityReport.recommendations.length,
+        hasErrors: !!(errorAnalysis && !errorAnalysis.error && errorAnalysis.summary.totalErrors > 0)
+      });
+      
+      return qualityReport;
+      
+    } catch (error) {
+      const fallbackReport = {
+        timestamp: new Date().toISOString(),
+        error: `Quality assurance failed: ${error.message}`,
+        dataCompleteness: { completionRate: 'unknown' },
+        pipelineHealth: { status: 'unknown' },
+        recommendations: [],
+        overallQuality: { level: 'unknown', score: 0 }
+      };
+      
+      console.warn('⚠️ Quality assurance failed, using fallback assessment');
+      logOperation('pipeline-quality-assurance-error', { error: error.message });
+      
+      return fallbackReport;
+    }
+  }
+
+  /**
+   * Calculate data completeness metrics
+   * @param {Array} analysisResults - Analysis results
+   * @param {Object} cleanedData - Original cleaned data
+   * @returns {Object} Completeness metrics
+   */
+  calculateDataCompleteness(analysisResults, cleanedData) {
+    const totalQuestions = cleanedData.questions.length;
+    const successfulResults = analysisResults.filter(r => !r.error && r.themes && r.themes.length > 0);
+    const partialResults = analysisResults.filter(r => !r.error && (!r.themes || r.themes.length === 0));
+    const failedResults = analysisResults.filter(r => r.error);
+    
+    const completionRate = totalQuestions > 0 ? 
+      ((successfulResults.length + partialResults.length * 0.5) / totalQuestions * 100).toFixed(1) : 0;
+    
+    return {
+      totalQuestions,
+      successfulQuestions: successfulResults.length,
+      partialQuestions: partialResults.length,
+      failedQuestions: failedResults.length,
+      completionRate: completionRate + '%',
+      usableDataRate: totalQuestions > 0 ? 
+        (((successfulResults.length + partialResults.length) / totalQuestions) * 100).toFixed(1) + '%' : '0%'
+    };
+  }
+
+  /**
+   * Assess overall pipeline health
+   * @param {Array} analysisResults - Analysis results
+   * @returns {Object} Health assessment
+   */
+  assessPipelineHealth(analysisResults) {
+    const totalResults = analysisResults.length;
+    const errorCount = analysisResults.filter(r => r.error).length;
+    const successCount = analysisResults.filter(r => !r.error).length;
+    
+    let status = 'healthy';
+    let score = 100;
+    const issues = [];
+    
+    // Calculate health score
+    if (errorCount > 0) {
+      const errorRate = (errorCount / totalResults) * 100;
+      score -= errorRate;
+      
+      if (errorRate >= 50) {
+        status = 'critical';
+        issues.push(`High failure rate: ${errorRate.toFixed(1)}% of questions failed`);
+      } else if (errorRate >= 25) {
+        status = 'degraded';
+        issues.push(`Moderate failure rate: ${errorRate.toFixed(1)}% of questions failed`);
+      } else {
+        status = 'minor_issues';
+        issues.push(`Low failure rate: ${errorRate.toFixed(1)}% of questions failed`);
+      }
+    }
+    
+    // Check for component-specific issues
+    const componentsWithIssues = new Set();
+    analysisResults.forEach(result => {
+      if (!result.error) {
+        if (!result.themes || result.themes.length === 0) {
+          componentsWithIssues.add('theme_generation');
+        }
+        if (!result.classifications || Object.keys(result.classifications).length === 0) {
+          componentsWithIssues.add('classification');
+        }
+        if (!result.quotes || Object.keys(result.quotes || {}).length === 0) {
+          componentsWithIssues.add('quote_extraction');
+        }
+        if (!result.summary) {
+          componentsWithIssues.add('summarization');
+        }
+      }
+    });
+    
+    if (componentsWithIssues.size > 0) {
+      issues.push(`Component issues detected: ${Array.from(componentsWithIssues).join(', ')}`);
+      score -= componentsWithIssues.size * 5;
+    }
+    
+    return {
+      status,
+      score: Math.max(0, score),
+      issues,
+      totalResults,
+      successfulResults: successCount,
+      errorResults: errorCount,
+      healthMetrics: {
+        successRate: totalResults > 0 ? ((successCount / totalResults) * 100).toFixed(1) + '%' : '0%',
+        componentIssues: Array.from(componentsWithIssues)
+      }
+    };
+  }
+
+  /**
+   * Generate quality improvement recommendations
+   * @param {Array} analysisResults - Analysis results
+   * @param {Object} errorAnalysis - Error analysis results
+   * @returns {Array} Quality recommendations
+   */
+  generateQualityRecommendations(analysisResults, errorAnalysis) {
+    const recommendations = [];
+    
+    // Check for widespread failures
+    const failureRate = analysisResults.filter(r => r.error).length / analysisResults.length;
+    if (failureRate >= 0.3) {
+      recommendations.push({
+        priority: 'high',
+        category: 'system_reliability',
+        title: 'High Failure Rate Detected',
+        description: `${(failureRate * 100).toFixed(1)}% of questions failed analysis`,
+        actions: [
+          'Check LLM service health and API quotas',
+          'Validate input data quality and format',
+          'Review network connectivity and timeout settings',
+          'Consider implementing circuit breaker pattern'
+        ]
+      });
+    }
+    
+    // Add error analysis recommendations
+    if (errorAnalysis && !errorAnalysis.error && errorAnalysis.recommendations) {
+      recommendations.push(...errorAnalysis.recommendations);
+    }
+    
+    // Check for component-specific issues
+    const componentIssues = this.identifyComponentIssues(analysisResults);
+    if (componentIssues.length > 0) {
+      recommendations.push({
+        priority: 'medium',
+        category: 'component_optimization',
+        title: 'Component Performance Issues',
+        description: `Issues detected in: ${componentIssues.join(', ')}`,
+        actions: [
+          'Review prompt engineering for affected components',
+          'Implement component-specific retry mechanisms',
+          'Validate component input data requirements',
+          'Consider alternative processing approaches'
+        ]
+      });
+    }
+    
+    return recommendations;
+  }
+
+  /**
+   * Identify component-specific issues
+   * @param {Array} analysisResults - Analysis results
+   * @returns {Array} Components with issues
+   */
+  identifyComponentIssues(analysisResults) {
+    const componentIssues = [];
+    const issueCount = {};
+    
+    analysisResults.forEach(result => {
+      if (!result.error) {
+        if (!result.themes || result.themes.length === 0) {
+          issueCount.theme_generation = (issueCount.theme_generation || 0) + 1;
+        }
+        if (!result.classifications || Object.keys(result.classifications).length === 0) {
+          issueCount.classification = (issueCount.classification || 0) + 1;
+        }
+        if (!result.quotes || Object.keys(result.quotes || {}).length === 0) {
+          issueCount.quote_extraction = (issueCount.quote_extraction || 0) + 1;
+        }
+        if (!result.summary) {
+          issueCount.summarization = (issueCount.summarization || 0) + 1;
+        }
+      }
+    });
+    
+    // Consider components with issues in >20% of successful results
+    const threshold = Math.ceil(analysisResults.filter(r => !r.error).length * 0.2);
+    Object.entries(issueCount).forEach(([component, count]) => {
+      if (count >= threshold) {
+        componentIssues.push(component);
+      }
+    });
+    
+    return componentIssues;
+  }
+
+  /**
+   * Calculate overall quality score
+   * @param {Object} completeness - Data completeness metrics
+   * @param {Object} health - Pipeline health assessment
+   * @returns {Object} Overall quality assessment
+   */
+  calculateOverallQuality(completeness, health) {
+    const completionScore = parseFloat(completeness.completionRate) || 0;
+    const healthScore = health.score || 0;
+    
+    // Weighted average: 60% completion, 40% health
+    const overallScore = (completionScore * 0.6) + (healthScore * 0.4);
+    
+    let level = 'poor';
+    if (overallScore >= 90) {
+      level = 'excellent';
+    } else if (overallScore >= 80) {
+      level = 'good';
+    } else if (overallScore >= 70) {
+      level = 'acceptable';
+    } else if (overallScore >= 50) {
+      level = 'fair';
+    }
+    
+    return {
+      level,
+      score: overallScore.toFixed(1),
+      breakdown: {
+        completionScore: completionScore.toFixed(1),
+        healthScore: healthScore.toFixed(1)
+      }
+    };
+  }
+
+  /**
+   * Enhanced pipeline finalization with quality assurance
+   * @param {Array} analysisResults - Analysis results
+   * @param {Object} outputFiles - Generated output files
+   * @param {Object} qualityAssurance - Quality assurance report
+   * @returns {Object} Enhanced pipeline execution summary
+   */
+  finalizePipelineEnhanced(analysisResults, outputFiles, qualityAssurance) {
+    console.log('🎯 Finalizing enhanced pipeline...');
+    
+    try {
+      const endTime = new Date();
+      const duration = endTime - this.startTime;
+      
+      const summary = {
+        status: 'completed',
+        startTime: this.startTime.toISOString(),
+        endTime: endTime.toISOString(),
+        duration: this.getProcessingDuration(),
+        statistics: {
+          questionsAnalyzed: analysisResults.length,
+          questionsSuccessful: analysisResults.filter(r => !r.error).length,
+          questionsFailed: analysisResults.filter(r => r.error).length,
+          totalParticipants: this.calculateUniqueParticipants(analysisResults),
+          totalThemes: this.calculateTotalThemes(analysisResults),
+          totalQuotes: this.calculateTotalQuotes(analysisResults)
+        },
+        outputFiles: outputFiles,
+        qualityAssurance: qualityAssurance,
+        qualityMetrics: this.calculateQualityMetrics(analysisResults),
+        pipelineVersion: '4.2.0-enhanced'
+      };
+      
+      // Enhanced logging
+      console.log('\n📋 Enhanced Pipeline Summary:');
+      console.log(`  ⏱️  Duration: ${summary.duration}`);
+      console.log(`  📊 Questions: ${summary.statistics.questionsSuccessful}/${summary.statistics.questionsAnalyzed} successful`);
+      console.log(`  👥 Participants: ${summary.statistics.totalParticipants}`);
+      console.log(`  🏷️  Themes: ${summary.statistics.totalThemes}`);
+      console.log(`  💬 Quotes: ${summary.statistics.totalQuotes}`);
+      console.log(`  📁 Output files: ${outputFiles.totalFiles} files generated`);
+      console.log(`  🎯 Quality: ${qualityAssurance.overallQuality.level} (${qualityAssurance.overallQuality.score}%)`);
+      
+      if (summary.statistics.questionsFailed > 0) {
+        console.log(`  ⚠️  Failed questions: ${summary.statistics.questionsFailed}`);
+      }
+      
+      if (qualityAssurance.recommendations.length > 0) {
+        console.log(`  💡 Recommendations: ${qualityAssurance.recommendations.length} improvement suggestions`);
+      }
+      
+      return summary;
+      
+    } catch (error) {
+      console.error('Pipeline finalization failed:', error.message);
+      return {
+        status: 'completed_with_errors',
+        error: error.message,
+        duration: this.getProcessingDuration(),
+        qualityAssurance: qualityAssurance || { overallQuality: { level: 'unknown' } }
+      };
     }
   }
 

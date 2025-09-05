@@ -8,7 +8,7 @@
  */
 
 import { validateConfig, getConfig, ANALYSIS_CONFIG, LLM_CONFIG } from '../src/utils/config/constants.js';
-import { initializeLLM, initializeLangSmith, validateLLMConfig, parseLLMResponse } from '../src/utils/config/llm-config.js';
+import { initializeLLM, parseLLMResponse } from '../src/utils/config/llm-config.js';
 
 /**
  * Test configuration system

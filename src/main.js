@@ -12,10 +12,12 @@ import { ParallelOrchestrator } from './analysis/workflows/parallel-orchestrator
 import { generateMainResults } from './outputs/generators/json-generator.js';
 import { generateClassificationFiles } from './outputs/generators/excel-generator.js';
 import { generateExecutiveSummary } from './outputs/generators/summary-generator.js';
+import { generateThematicAnalysis } from './outputs/generators/analysis-generator.js';
 import { analyzeAndReportErrors } from './utils/validation/error-analyzer.js';
 import { initializeLLM, logOperation } from './utils/config/llm-config.js';
 import { validateConfig } from './utils/config/constants.js';
 import { ensureDirectoryExists } from './utils/helpers/file-utils.js';
+import { createProductionMonitor } from './utils/monitoring/production-monitor.js';
 import dotenv from 'dotenv';
 
 // Load environment variables
@@ -31,12 +33,22 @@ export class ThematicAnalysisPipeline {
       backgroundPath: options.backgroundPath || 'inputs/project_background.txt',
       outputDir: options.outputDir || 'outputs',
       enableLangSmith: options.enableLangSmith === true,
+      enableProductionMonitoring: options.enableProductionMonitoring !== false,
       ...options
     };
     
     this.llm = null;
     this.langSmith = null;
     this.startTime = null;
+    this.monitor = null;
+    
+    // Initialize production monitoring if enabled
+    if (this.options.enableProductionMonitoring) {
+      this.monitor = createProductionMonitor({
+        outputDir: this.options.outputDir,
+        logLevel: process.env.NODE_ENV === 'production' ? 'INFO' : 'DEBUG'
+      });
+    }
   }
 
   /**
@@ -48,21 +60,64 @@ export class ThematicAnalysisPipeline {
       console.log('🚀 Starting Thematic Analysis Pipeline...');
       this.startTime = new Date();
       
+      // Start production monitoring
+      if (this.monitor) {
+        this.monitor.startPhase('PIPELINE_EXECUTION', {
+          inputPath: this.options.inputExcelPath,
+          outputDir: this.options.outputDir
+        });
+      }
+      
       // Phase 1: Initialize and validate
+      if (this.monitor) this.monitor.startPhase('INITIALIZATION');
       const initResult = await this.initializePipeline();
+      if (this.monitor) this.monitor.endPhase('INITIALIZATION', { success: !initResult.error });
+      
       if (initResult.error) {
+        if (this.monitor) {
+          this.monitor.recordError('INITIALIZATION_FAILURE', initResult.error);
+          await this.monitor.generateReport(`${this.options.outputDir}/monitoring_report_failed.json`);
+        }
         return { error: `Initialization failed: ${initResult.error}` };
       }
       
       // Phase 2: Data extraction and parsing
+      if (this.monitor) this.monitor.startPhase('DATA_EXTRACTION');
       const cleanedData = await this.extractAndParseData();
+      if (this.monitor) {
+        this.monitor.endPhase('DATA_EXTRACTION', { 
+          success: !cleanedData.error,
+          questionsExtracted: cleanedData.questions?.length || 0,
+          responsesExtracted: cleanedData.responsesByQuestion ? 
+            Object.values(cleanedData.responsesByQuestion).reduce((sum, responses) => sum + responses.length, 0) : 0
+        });
+      }
+      
       if (cleanedData.error) {
+        if (this.monitor) {
+          this.monitor.recordError('DATA_EXTRACTION_FAILURE', cleanedData.error);
+          await this.monitor.generateReport(`${this.options.outputDir}/monitoring_report_failed.json`);
+        }
         return { error: `Data extraction failed: ${cleanedData.error}` };
       }
       
       // Phase 3: Thematic analysis with enhanced error handling
+      if (this.monitor) this.monitor.startPhase('THEMATIC_ANALYSIS');
       const analysisResults = await this.runThematicAnalysisEnhanced(cleanedData);
+      if (this.monitor) {
+        const successfulAnalyses = analysisResults.analyses ? analysisResults.analyses.filter(a => !a.error).length : 0;
+        this.monitor.endPhase('THEMATIC_ANALYSIS', { 
+          success: !analysisResults.error,
+          successfulQuestions: successfulAnalyses,
+          totalQuestions: analysisResults.analyses?.length || 0
+        });
+      }
+      
       if (analysisResults.error) {
+        if (this.monitor) {
+          this.monitor.recordError('ANALYSIS_FAILURE', analysisResults.error);
+          await this.monitor.generateReport(`${this.options.outputDir}/monitoring_report_failed.json`);
+        }
         return { error: `Analysis failed: ${analysisResults.error}` };
       }
       
@@ -70,13 +125,39 @@ export class ThematicAnalysisPipeline {
       const qualityAssurance = this.performQualityAssurance(analysisResults, cleanedData);
       
       // Phase 4: Generate outputs with enhanced multi-question support
+      if (this.monitor) this.monitor.startPhase('OUTPUT_GENERATION');
       const outputFiles = await this.generateOutputsEnhanced(analysisResults, cleanedData, qualityAssurance);
+      if (this.monitor) {
+        this.monitor.endPhase('OUTPUT_GENERATION', { 
+          success: !outputFiles.error,
+          outputFiles: outputFiles.totalFiles || 0
+        });
+      }
+      
       if (outputFiles.error) {
+        if (this.monitor) {
+          this.monitor.recordError('OUTPUT_GENERATION_FAILURE', outputFiles.error);
+          await this.monitor.generateReport(`${this.options.outputDir}/monitoring_report_failed.json`);
+        }
         return { error: `Output generation failed: ${outputFiles.error}` };
       }
       
       // Phase 5: Finalize and report with comprehensive analysis
+      if (this.monitor) this.monitor.startPhase('FINALIZATION');
       const summary = this.finalizePipelineEnhanced(analysisResults, outputFiles, qualityAssurance);
+      if (this.monitor) {
+        this.monitor.endPhase('FINALIZATION', { success: true });
+        this.monitor.endPhase('PIPELINE_EXECUTION', { success: true });
+        
+        // Generate comprehensive monitoring report
+        const monitoringReport = await this.monitor.generateReport(`${this.options.outputDir}/monitoring_report.json`);
+        summary.monitoring = {
+          sessionId: monitoringReport.sessionId,
+          healthScore: monitoringReport.healthScore,
+          metrics: monitoringReport.metrics,
+          reportPath: `${this.options.outputDir}/monitoring_report.json`
+        };
+      }
       
       console.log('✅ Thematic Analysis Pipeline completed successfully!');
       logOperation('pipeline-completed', { 
@@ -89,6 +170,16 @@ export class ThematicAnalysisPipeline {
       
     } catch (error) {
       console.error('❌ Pipeline failed:', error.message);
+      
+      if (this.monitor) {
+        this.monitor.recordError('PIPELINE_FAILURE', error.message, { stack: error.stack });
+        try {
+          await this.monitor.generateReport(`${this.options.outputDir}/monitoring_report_crashed.json`);
+        } catch (reportError) {
+          console.error('Failed to generate monitoring report:', reportError.message);
+        }
+      }
+      
       return { error: `Thematic analysis failed: ${error.message}` };
     }
   }
@@ -265,10 +356,26 @@ export class ThematicAnalysisPipeline {
         totalFiles: 0
       };
       
-      // Generate main JSON results with enhanced metadata
-      console.log('- Generating main results JSON with enhanced multi-question support...');
+      // Generate user-facing thematic analysis (PRIMARY OUTPUT)
+      console.log('- Generating user-facing thematic analysis...');
+      const thematicAnalysis = await generateThematicAnalysis(analysisResults, {
+        outputDirectory: this.options.outputDir,
+        projectTitle: "VPN Selection Preferences Study"
+      });
+      
+      if (thematicAnalysis.error) {
+        console.warn('  ⚠️  Failed to generate thematic analysis');
+        console.warn(`  Error: ${thematicAnalysis.error}`);
+      } else {
+        console.log(`  ✅ Generated: ${thematicAnalysis.fileName} (PRIMARY USER OUTPUT)`);
+      }
+      outputFiles.thematicAnalysis = thematicAnalysis.fileName || 'thematic_analysis.json';
+      outputFiles.totalFiles++;
+
+      // Generate technical JSON results for pipeline debugging
+      console.log('- Generating technical results JSON for pipeline debugging...');
       const finalReport = await generateMainResults(analysisResults, {
-        outputPath: `${this.options.outputDir}/thematic_analysis_results.json`,
+        outputPath: `${this.options.outputDir}/technical_pipeline_results.json`,
         startTime: this.startTime,
         inputExcelPath: this.options.inputExcelPath,
         backgroundPath: this.options.backgroundPath,
@@ -276,10 +383,12 @@ export class ThematicAnalysisPipeline {
       });
       
       if (finalReport.error) {
-        return { error: `JSON generation failed: ${finalReport.error}` };
+        console.warn('  ⚠️  Failed to generate technical results JSON');
+        console.warn(`  Error: ${finalReport.error}`);
+      } else {
+        console.log(`  ✅ Generated: ${finalReport.fileName} (technical debugging)`);
       }
-      
-      outputFiles.mainResults = 'thematic_analysis_results.json';
+      outputFiles.technicalResults = 'technical_pipeline_results.json';
       outputFiles.totalFiles++;
       
       // Generate classification Excel files with enhanced error handling
@@ -314,9 +423,12 @@ export class ThematicAnalysisPipeline {
       outputFiles.totalFiles++;
       
       console.log(`✅ Output generation completed - ${outputFiles.totalFiles} files created`);
+      console.log(`   📊 PRIMARY OUTPUT: ${outputFiles.thematicAnalysis} (user-facing thematic analysis)`);
+      console.log(`   🔧 Technical output: ${outputFiles.technicalResults} (pipeline debugging)`);
       logOperation('outputs-generated', { 
         totalFiles: outputFiles.totalFiles,
-        jsonFile: outputFiles.mainResults,
+        primaryOutput: outputFiles.thematicAnalysis,
+        technicalOutput: outputFiles.technicalResults,
         summaryFile: outputFiles.executiveSummary,
         excelFiles: outputFiles.classificationFiles.length
       });

@@ -7,10 +7,21 @@
   "scripts": {
     "start": "node src/main.js",
     "dev": "node --inspect src/main.js",
-    "test": "echo 'TODO: Add test suite'",
-    "test-config": "node tests/test-config.js",
-    "lint": "echo 'TODO: Add ESLint configuration'",
-    "validate": "node -e 'import(\"./src/utils/config/constants.js\").then(m => console.log(m.validateConfig()))'"
+    "test": "npm run test:config && npm run test:basic && npm run test:integration",
+    "test:config": "node tests/test-config.js",
+    "test:basic": "node tests/test-validation-basic.js && node tests/test-excel-extraction.js",
+    "test:integration": "node tests/test-phase1-integration.js && node tests/test-end-to-end-llm.js",
+    "test:production": "node tests/test-production-validation.js",
+    "test:performance": "node tests/test-performance-benchmarks.js",
+    "test:all": "npm run test && npm run test:production && npm run test:performance",
+    "validate": "node -e 'import(\"./src/utils/config/constants.js\").then(m => console.log(m.validateConfig()))'",
+    "validate:env": "npm run validate && node -e 'console.log(\"Environment validation:\", process.env.OPENAI_API_KEY ? \"✅ OPENAI_API_KEY set\" : \"❌ OPENAI_API_KEY missing\")'",
+    "lint": "node -e 'console.log(\"🔍 Linting project files...\"); import(\"./src/main.js\").then(() => console.log(\"✅ No syntax errors found\")).catch(e => { console.error(\"❌ Syntax errors:\", e.message); process.exit(1); })'",
+    "clean": "rm -rf outputs/test-* outputs/production-* outputs/performance-* node_modules/.cache",
+    "demo": "node demo-phase1.js",
+    "benchmark": "npm run test:performance",
+    "health-check": "npm run validate:env && npm run lint && echo '✅ System health check passed'",
+    "deploy-check": "npm run health-check && npm run test:production && echo '🚀 System ready for deployment'"
   },
   "keywords": [
     "thematic-analysis",

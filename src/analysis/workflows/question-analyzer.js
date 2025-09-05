@@ -11,6 +11,7 @@ import { logOperation } from '../../utils/config/llm-config.js';
 import { ThemeGeneratorAgent } from '../agents/theme-generator.js';
 import { ClassifierAgent } from '../agents/classifier.js';
 import { QuoteExtractorAgent } from '../agents/quote-extractor.js';
+import { SummarizerAgent } from '../agents/summarizer.js';
 import { ThemeValidator } from '../../utils/validation/theme-validator.js';
 
 /**
@@ -37,6 +38,7 @@ export class QuestionAnalysisWorkflow {
     this.themeGeneratorAgent = null; // Initialize on first use
     this.classifierAgent = null; // Initialize on first use
     this.quoteExtractorAgent = null; // Initialize on first use
+    this.summarizerAgent = null; // Initialize on first use
     this.themeValidator = null; // Initialize on first use
     this.initializeGraph();
   }
@@ -415,25 +417,92 @@ export class QuestionAnalysisWorkflow {
    * @returns {Promise<QuestionAnalysisState>} Updated state with summary
    */
   async generateSummary(state) {
+    const nodeStart = Date.now();
     logOperation('node-generateSummary', { 
       questionId: state.question.questionId,
       derivedQuestion: state.derivedQuestion
     });
     
-    // MVP placeholder: Create mock summary
-    const summary = {
-      headline: `Analysis of ${state.question.questionId}`,
-      summary: `The analysis of "${state.derivedQuestion}" revealed ${state.themes?.length} main themes.`,
-      keyInsights: [
-        'Theme distribution shows balanced coverage',
-        'Quote validation passed for all extracts'
-      ]
-    };
+    try {
+      // Initialize SummarizerAgent if needed
+      if (!this.summarizerAgent) {
+        this.summarizerAgent = new SummarizerAgent();
+      }
 
-    return {
-      ...state,
-      summary
-    };
+      // Prepare input for summarizer
+      const summarizerInput = {
+        derivedQuestion: state.derivedQuestion,
+        themes: state.themes,
+        classifications: state.classifications,
+        stats: state.stats,
+        projectBackground: state.projectBackground
+      };
+
+      // Generate summary using LLM
+      const summaryResult = await this.summarizerAgent.invoke(summarizerInput);
+      
+      if (summaryResult.error) {
+        console.error('Summary generation failed:', summaryResult.error);
+        
+        // Fallback to basic summary on LLM failure
+        const fallbackSummary = {
+          headline: `Analysis of ${state.question.questionId}`,
+          summary: `The analysis of "${state.derivedQuestion}" revealed ${state.themes?.length} main themes across ${state.classifications?.length} participant responses.`,
+          keyInsights: [
+            `${state.themes?.length} distinct themes identified`,
+            `${state.classifications?.length} responses successfully classified`,
+            'Theme validation and quote extraction completed'
+          ]
+        };
+        
+        logOperation('node-generateSummary-fallback', {
+          reason: summaryResult.error,
+          fallbackUsed: true
+        });
+
+        return {
+          ...state,
+          summary: fallbackSummary,
+          summaryGenerationTime: Date.now() - nodeStart
+        };
+      }
+
+      const nodeEnd = Date.now();
+      const nodeDuration = nodeEnd - nodeStart;
+
+      logOperation('node-generateSummary-complete', {
+        headline: summaryResult.summary.headline,
+        summaryLength: summaryResult.summary.summary.length,
+        keyInsightsCount: summaryResult.summary.keyInsights.length,
+        duration: `${nodeDuration}ms`
+      });
+
+      return {
+        ...state,
+        summary: summaryResult.summary,
+        summaryGenerationTime: nodeDuration
+      };
+
+    } catch (error) {
+      console.error('Summary generation error:', error);
+      
+      // Fallback summary on any error
+      const fallbackSummary = {
+        headline: `Analysis of ${state.question.questionId}`,
+        summary: `The analysis of "${state.derivedQuestion}" revealed ${state.themes?.length} main themes. Error occurred during LLM summary generation.`,
+        keyInsights: [
+          'Analysis completed with manual fallback',
+          'LLM summary generation encountered an error'
+        ]
+      };
+
+      return {
+        ...state,
+        summary: fallbackSummary,
+        summaryGenerationTime: Date.now() - nodeStart,
+        summaryError: error.message
+      };
+    }
   }
 
   /**

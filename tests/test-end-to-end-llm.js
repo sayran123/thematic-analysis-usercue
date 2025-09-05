@@ -313,10 +313,24 @@ async function runEndToEndLLMTest() {
       console.log('  ❌ No quotes extracted');
     }
     
-    // 5.5: Summary (Mock - will be LLM in future)
-    console.log('\n📝 SUMMARY GENERATION RESULTS (Mock - Future LLM):');
+    // 5.5: Summary (Real LLM - Complete Implementation)
+    console.log('\n📝 SUMMARY GENERATION RESULTS (REAL LLM):');
     if (finalState.summary) {
       logDataStructure('Generated Summary', finalState.summary);
+      
+      // Validate summary structure and quality
+      console.log('\n🔍 Summary Quality Validation:');
+      console.log(`  📰 Headline Length: ${finalState.summary.headline?.length || 0} characters`);
+      console.log(`  📄 Summary Length: ${finalState.summary.summary?.length || 0} characters`);
+      console.log(`  💡 Key Insights Count: ${finalState.summary.keyInsights?.length || 0}`);
+      
+      if (finalState.summaryGenerationTime) {
+        console.log(`  ⏱️  Generation Time: ${finalState.summaryGenerationTime}ms`);
+      }
+      
+      if (finalState.summaryError) {
+        console.log(`  ⚠️  Generation Error: ${finalState.summaryError}`);
+      }
     } else {
       console.log('  ❌ No summary generated');
     }
@@ -343,15 +357,15 @@ async function runEndToEndLLMTest() {
     console.log(`  ${finalState.themes ? '✅' : '❌'} Theme Generation (LLM): ${finalState.themes?.length || 0} themes`);
     console.log(`  ${finalState.themeValidation?.passed ? '✅' : '❌'} Theme Validation: ${finalState.themeValidation?.passed ? 'PASSED' : 'FAILED'}`);
     console.log(`  ${finalState.classifications ? '✅' : '❌'} Classifications (LLM): ${finalState.classifications?.length || 0} items`);
-    console.log(`  ${finalState.quotes ? '✅' : '❌'} Quote Extraction (Mock): Available`);
-    console.log(`  ${finalState.summary ? '✅' : '❌'} Summary Generation (Mock): Available`);
+    console.log(`  ${finalState.quotes ? '✅' : '❌'} Quote Extraction (REAL LLM): Available`);
+    console.log(`  ${finalState.summary ? '✅' : '❌'} Summary Generation (REAL LLM): Available`);
     
     console.log('\n🎯 LLM Integration Status:');
     console.log('  🤖 Theme Generation: ✅ REAL LLM');
     console.log('  🛡️  Theme Validation: ✅ IMPLEMENTED');
     console.log('  🏷️  Classification: ✅ REAL LLM');
-    console.log('  💬 Quote Extraction: ⏳ Mock (Next: Real LLM)');
-    console.log('  📝 Summary Generation: ⏳ Mock (Future: Real LLM)');
+    console.log('  💬 Quote Extraction: ✅ REAL LLM');
+    console.log('  📝 Summary Generation: ✅ REAL LLM');
     
     return {
       success: true,

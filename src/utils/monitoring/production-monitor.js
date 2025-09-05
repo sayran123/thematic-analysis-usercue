@@ -30,7 +30,6 @@ export class ProductionMonitor {
         endTime: null,
         endTimeHR: null
       },
-      phases: new Map(),
       performance: {
         memory: [],
         cpu: [],
@@ -45,6 +44,8 @@ export class ProductionMonitor {
       errors: [],
       warnings: []
     };
+    
+    this.phases = new Map();
     
     this.activePhases = new Map();
     this.memoryMonitor = null;
@@ -227,7 +228,7 @@ export class ProductionMonitor {
    * Calculate comprehensive metrics
    */
   calculateMetrics() {
-    const phases = Array.from(this.metrics.phases.values());
+    const phases = Array.from(this.phases.values());
     const apiCalls = this.metrics.performance.api;
     const memoryReadings = this.metrics.performance.memory;
     
@@ -295,8 +296,8 @@ export class ProductionMonitor {
    * Get total operation count
    */
   getOperationCount() {
-    const phases = Array.from(this.metrics.phases.values());
-    return phases.reduce((sum, phase) => sum + phase.metrics.operations, 0);
+    const phases = Array.from(this.phases.values());
+    return phases.reduce((sum, phase) => sum + (phase.metrics?.operations || 0), 0);
   }
   
   /**
@@ -385,7 +386,7 @@ export class ProductionMonitor {
       session: this.metrics.session,
       metrics: this.calculateMetrics(),
       healthScore: this.generateHealthScore(),
-      phases: Array.from(this.metrics.phases.values()),
+      phases: Array.from(this.phases.values()),
       errors: this.metrics.errors,
       warnings: this.metrics.warnings,
       quality: this.metrics.quality,

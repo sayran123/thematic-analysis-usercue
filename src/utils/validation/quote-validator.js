@@ -16,7 +16,7 @@ export class QuoteValidator {
     this.config = {
       // Text normalization settings
       preserveCase: options.preserveCase || false,
-      preservePunctuation: options.preservePunctuation || false,
+      preservePunctuation: options.preservePunctuation || true, // More lenient - preserve punctuation by default
       allowPartialMatches: options.allowPartialMatches || false,
       minQuoteLength: options.minQuoteLength || 3, // Minimum words for validation
       

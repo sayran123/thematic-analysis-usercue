@@ -35,7 +35,9 @@ export function formatPrompt(promptTemplate, input) {
   // Extract user responses for context
   const userResponseSamples = responses.slice(0, 5).map(r => {
     const userText = extractUserTextFromConversation(r.cleanResponse);
-    return `Participant ${r.participantId}: "${userText.substring(0, 150)}..."`;
+    // Show more context but cap at reasonable length for LLM
+    const displayText = userText.length > 300 ? userText.substring(0, 300) + "..." : userText;
+    return `Participant ${r.participantId}: "${displayText}"`;
   }).join('\n');
 
   // Format themes for prompt
@@ -81,9 +83,10 @@ function getQuoteExtractionPrompt(options = {}) {
     CRITICAL RULES:
     - Extract quotes ONLY from 'user:' portions of conversations (ignore 'assistant:' parts)
     - Quotes must be VERBATIM - exact word-for-word matches from the source text
-    - Maximum 3 quotes per theme
-    - Maximum 1 quote per participant per theme
-    - Quotes should be substantial (typically >10 words, but prioritize quality over length)
+    - AIM FOR 3 QUOTES PER THEME - this is the target, provide fewer only if insufficient quality quotes exist
+    - Maximum 1 quote per participant per theme (to ensure diversity of voices)
+    - Quotes should be substantial (typically >10 words, but prioritize completeness and clarity over length)
+    - Include complete sentences or complete thoughts - avoid truncating mid-sentence
     - Return exact participant ID for each quote
     - If no good quotes exist for a theme, return empty array for that theme
     
@@ -105,19 +108,36 @@ function getQuoteExtractionPrompt(options = {}) {
     {userResponseSamples}
     
     OUTPUT FORMAT:
-    Respond with a JSON object where each theme ID maps to an array of quote objects:
+    Respond with a JSON object where each theme ID maps to an array of quote objects.
+    AIM FOR 3 QUOTES PER THEME when quality quotes are available:
     
     {
       "theme_1_id": [
         {
           "quote": "exact verbatim text from user response",
           "participantId": "participant_id_here"
+        },
+        {
+          "quote": "second exact verbatim quote from different participant",
+          "participantId": "different_participant_id"
+        },
+        {
+          "quote": "third exact verbatim quote from third participant",
+          "participantId": "third_participant_id"
         }
       ],
       "theme_2_id": [
         {
           "quote": "another exact verbatim quote",
+          "participantId": "participant_id_here"
+        },
+        {
+          "quote": "second quote for this theme",
           "participantId": "different_participant_id"
+        },
+        {
+          "quote": "third quote for this theme",
+          "participantId": "third_participant_id"
         }
       ]
     }
@@ -150,8 +170,8 @@ function getQuoteExtractionRetryPrompt(options = {}) {
     - Quotes must be VERBATIM - exact word-for-word matches from the source text
     - Do NOT paraphrase, summarize, or modify quotes in any way
     - Do NOT combine text from different parts of the conversation
-    - Maximum 3 quotes per theme
-    - Maximum 1 quote per participant per theme
+    - AIM FOR 3 QUOTES PER THEME - this is essential for comprehensive analysis
+    - Maximum 1 quote per participant per theme (to ensure diversity of voices)
     - Quotes should be substantial (typically >10 words, but prioritize accuracy over length)
     - Return exact participant ID for each quote
     

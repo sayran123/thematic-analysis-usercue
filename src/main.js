@@ -149,13 +149,18 @@ export class ThematicAnalysisPipeline {
         this.monitor.endPhase('FINALIZATION', { success: true });
         this.monitor.endPhase('PIPELINE_EXECUTION', { success: true });
         
-        // Generate comprehensive monitoring report
-        const monitoringReport = await this.monitor.generateReport(`${this.options.outputDir}/monitoring_report.json`);
+        // Generate comprehensive monitoring report with timestamp
+        const monitoringTimestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
+        const monitoringTimeStr = new Date().toTimeString().slice(0, 5).replace(':', '');
+        const monitoringFileName = `${monitoringTimestamp}_${monitoringTimeStr}_monitoring_report.json`;
+        const monitoringPath = `${this.options.outputDir}/${monitoringFileName}`;
+        
+        const monitoringReport = await this.monitor.generateReport(monitoringPath);
         summary.monitoring = {
           sessionId: monitoringReport.sessionId,
           healthScore: monitoringReport.healthScore,
           metrics: monitoringReport.metrics,
-          reportPath: `${this.options.outputDir}/monitoring_report.json`
+          reportPath: monitoringPath
         };
       }
       
@@ -374,8 +379,13 @@ export class ThematicAnalysisPipeline {
 
       // Generate technical JSON results for pipeline debugging
       console.log('- Generating technical results JSON for pipeline debugging...');
+      const now = new Date();
+      const timestamp = now.toISOString().replace(/[:.]/g, '-').split('T')[0]; // Date part
+      const timeStr = now.toTimeString().slice(0, 5).replace(':', ''); // Time part
+      const technicalFileName = `${timestamp}_${timeStr}_technical_pipeline_results.json`;
+      
       const finalReport = await generateMainResults(analysisResults, {
-        outputPath: `${this.options.outputDir}/technical_pipeline_results.json`,
+        outputPath: `${this.options.outputDir}/${technicalFileName}`,
         startTime: this.startTime,
         inputExcelPath: this.options.inputExcelPath,
         backgroundPath: this.options.backgroundPath,
@@ -386,9 +396,9 @@ export class ThematicAnalysisPipeline {
         console.warn('  ⚠️  Failed to generate technical results JSON');
         console.warn(`  Error: ${finalReport.error}`);
       } else {
-        console.log(`  ✅ Generated: ${finalReport.fileName} (technical debugging)`);
+        console.log(`  ✅ Generated: ${technicalFileName} (technical debugging)`);
       }
-      outputFiles.technicalResults = 'technical_pipeline_results.json';
+      outputFiles.technicalResults = technicalFileName;
       outputFiles.totalFiles++;
       
       // Generate classification Excel files with enhanced error handling
@@ -410,8 +420,12 @@ export class ThematicAnalysisPipeline {
       
       // Generate executive summary with failure awareness
       console.log('- Generating executive summary with data quality assessment...');
+      const summaryTimestamp = now.toISOString().replace(/[:.]/g, '-').split('T')[0]; // Reuse same timestamp
+      const summaryTimeStr = now.toTimeString().slice(0, 5).replace(':', '');
+      const summaryFileName = `${summaryTimestamp}_${summaryTimeStr}_executive_summary.md`;
+      
       const summaryResult = await generateExecutiveSummary(analysisResults, finalReport, {
-        outputPath: `${this.options.outputDir}/executive_summary.md`,
+        outputPath: `${this.options.outputDir}/${summaryFileName}`,
         qualityAssurance
       });
       
@@ -419,7 +433,7 @@ export class ThematicAnalysisPipeline {
         return { error: `Summary generation failed: ${summaryResult.error}` };
       }
       
-      outputFiles.executiveSummary = 'executive_summary.md';
+      outputFiles.executiveSummary = summaryFileName;
       outputFiles.totalFiles++;
       
       console.log(`✅ Output generation completed - ${outputFiles.totalFiles} files created`);

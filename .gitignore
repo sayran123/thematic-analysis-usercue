@@ -47,7 +47,7 @@ coverage/
 *.lcov
 
 # Output directories
-outputs/
+/outputs/
 dist/
 build/
 
